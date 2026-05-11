@@ -388,7 +388,7 @@ function ScanView({ onAddPoints }) {
             { role: 'user', content: AI_PROMPT + text }
           ],
           temperature: 0.3,
-          max_tokens: 2048,
+          max_tokens: 4096,
         }),
       })
 
