@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import Tesseract from 'tesseract.js'
 
-// Gemini API (free tier)
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+// Groq API (free tier)
+const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || ''
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
 // Types
 const TYPE_COLORS = {
@@ -218,22 +218,30 @@ function ScanView({ onAddPoints }) {
     setSelected({})
 
     try {
-      const response = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+      const response = await fetch(GROQ_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_KEY}`,
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、语法、搭配和表达。请从以下文本中提取考点，只返回JSON数组：' + AI_PROMPT + text }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、语法、搭配和表达。只返回JSON数组，不要其他文字。' },
+            { role: 'user', content: AI_PROMPT + text }
+          ],
+          temperature: 0.3,
+          max_tokens: 4096,
         }),
       })
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
-        throw new Error(err.error?.message || 'Gemini API请求失败')
+        throw new Error(err.error?.message || 'Groq API请求失败')
       }
 
       const data = await response.json()
-      const content = data.candidates?.[0]?.content?.parts?.[0]?.text
+      const content = data.choices?.[0]?.message?.content
 
       if (!content) throw new Error('未获取到有效响应')
 
