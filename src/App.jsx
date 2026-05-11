@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
+import Tesseract from 'tesseract.js'
 
-// API Key - set VITE_OPENAI_API_KEY in .env file
-const API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
-const API_URL = 'https://api.openai.com/v1/chat/completions'
+// Gemini API (free tier)
+const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 
 // Types
 const TYPE_COLORS = {
@@ -57,17 +58,6 @@ const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语
 待分析文本：
 `
 
-// AI Prompt for image OCR
-const IMAGE_OCR_PROMPT = `你是一个日语文字识别专家。请从这张图片中提取所有日语文本内容。
-
-要求：
-1. 完整提取图片中的所有日语文本
-2. 保持原文格式和换行
-3. 如果图片中包含考试信息（如JLPT、日期等），也一并提取
-4. 只返回提取到的日语文本，不要解释
-
-提取到的日语文本：
-`
 
 // Load/Save data from localStorage
 const loadData = () => {
@@ -101,37 +91,22 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
       const textExts = ['txt', 'md', 'text']
 
       if (imageExts.includes(ext)) {
-        // Image: use AI vision OCR
-        const base64 = await fileToBase64(file)
-        setPreviewUrl(base64)
+        // Image: use Tesseract.js OCR (free, no API needed)
+        setPreviewUrl(URL.createObjectURL(file))
+        setUploading(true) // restore uploading state
 
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'user', content: [
-                { type: 'text', text: IMAGE_OCR_PROMPT },
-                { type: 'image_url', image_url: { url: `data:${file.type};base64,${base64}` } }
-              ]}
-            ],
-            max_tokens: 4096,
-          }),
-        })
-
-        if (!response.ok) throw new Error('OCR请求失败')
-        const data = await response.json()
-        const extractedText = data.choices?.[0]?.message?.content
-
-        if (!extractedText || !extractedText.trim()) {
-          throw new Error('未能从图片中提取到文字，请确保图片清晰且包含日语文本')
+        try {
+          const result = await Tesseract.recognize(file, 'jpn', {
+            logger: () => {}
+          })
+          const text = result.data.text
+          if (!text.trim()) throw new Error('未能从图片中提取到文字，请确保图片清晰且包含日语文本')
+          onTextExtracted(text.trim())
+        } catch (err) {
+          onError(err.message || 'OCR识别失败')
+        } finally {
+          setUploading(false)
         }
-
-        onTextExtracted(extractedText.trim())
       } else if (textExts.includes(ext)) {
         // Text file: read directly
         const text = await file.text()
@@ -147,19 +122,6 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
     }
   }
 
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const result = reader.result
-        // Remove data URL prefix for API
-        const base64 = result.split(',')[1]
-        resolve(base64)
-      }
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
-  }
 
   const handleDrop = (e) => {
     e.preventDefault()
@@ -256,26 +218,22 @@ function ScanView({ onAddPoints }) {
     setSelected({})
 
     try {
-      const response = await fetch(API_URL, {
+      const response = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、语法、搭配和表达。' },
-            { role: 'user', content: AI_PROMPT + text }
-          ],
-          temperature: 0.3,
+          contents: [{ parts: [{ text: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、语法、搭配和表达。请从以下文本中提取考点，只返回JSON数组：' + AI_PROMPT + text }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
         }),
       })
 
-      if (!response.ok) throw new Error('API请求失败')
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error?.message || 'Gemini API请求失败')
+      }
 
       const data = await response.json()
-      const content = data.choices?.[0]?.message?.content
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text
 
       if (!content) throw new Error('未获取到有效响应')
 
