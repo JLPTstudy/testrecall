@@ -264,6 +264,34 @@ const parseGroqResponse = (content) => {
   throw new Error('JSON解析失败，请重试')
 }
 
+const normalizeDictForms = async (candidates) => {
+  const toFix = candidates.filter(c => c.type === 'vocabulary' || c.type === 'collocation')
+  if (toFix.length === 0) return candidates
+  const input = toFix.map(c => ({ id: c.id, term: c.term }))
+  try {
+    const content = await callGroq(
+      [
+        { role: 'system', content: '你是日语语法专家。只返回JSON数组，不要其他文字。' },
+        {
+          role: 'user',
+          content: `将以下日语词汇的term字段全部转为辞书形（原形），id字段原样保留：
+・动词活用形→辞书形：した/される/された/している/していた→する；んでいる→む；いでいる→ぐ；てきた→てくる；など
+・形容词变形→辞书形：くて/くない/かった→い形原形
+・名词、副词、惯用句：不变，原样保留
+输入：${JSON.stringify(input)}
+输出：同格式JSON数组，只修改需要还原的term，不需要还原的也原样返回。`,
+        },
+      ],
+      GROQ_TEXT_MODEL,
+    )
+    const normalized = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] || '[]')
+    const normMap = Object.fromEntries(normalized.map(n => [n.id, n.term]).filter(([, t]) => t))
+    return candidates.map(c => (normMap[c.id] ? { ...c, term: normMap[c.id] } : c))
+  } catch {
+    return candidates
+  }
+}
+
 const extractImageText = async (imageLike) => {
   const result = await Tesseract.recognize(imageLike, OCR_LANGS, {
     logger: () => {}
@@ -487,7 +515,8 @@ function ScanView({ onAddPoints }) {
       }
 
       const parsed = parseGroqResponse(content)
-      const newCandidates = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
+      let newCandidates = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
+      newCandidates = await normalizeDictForms(newCandidates)
       setCandidates(newCandidates)
 
       const initialSelected = {}
