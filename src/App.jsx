@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Tesseract from 'tesseract.js'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 // Groq API (free tier)
 const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || ''
@@ -76,6 +77,7 @@ const getSourceLabel = (source) => {
 
 const getSourceKindLabel = (kind) => {
   if (kind === 'image') return '图片'
+  if (kind === 'pdf') return 'PDF'
   if (kind === 'file') return '文件'
   return '文本'
 }
@@ -242,6 +244,34 @@ const buildSourceMeta = (file, kind) => ({
   addedAt: new Date().toISOString(),
 })
 
+const extractPdfText = async (file) => {
+  const pdfjsLib = await import('pdfjs-dist')
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+  const buffer = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+  const pages = []
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const pageText = content.items
+      .map((item) => ('str' in item ? item.str : ''))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (pageText) {
+      pages.push(`【PDF第${pageNumber}页】\n${pageText}`)
+    }
+  }
+
+  const text = pages.join('\n\n').trim()
+  if (!text) {
+    throw new Error('未能从 PDF 中提取到文字。这个 PDF 可能是扫描图片版，请先转成图片上传，或使用带文本层的 PDF。')
+  }
+  return text
+}
+
 // File Upload Component
 function FileUpload({ onTextExtracted, onError, disabled }) {
   const [isDragging, setIsDragging] = useState(false)
@@ -258,6 +288,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
       const ext = file.name.split('.').pop().toLowerCase()
       const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif']
       const textExts = ['txt', 'md', 'text']
+      const pdfExts = ['pdf']
 
       if (imageExts.includes(ext)) {
         // Image: use Tesseract.js OCR (free, no API needed)
@@ -281,8 +312,11 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
         const text = await file.text()
         if (!text.trim()) throw new Error('文件内容为空')
         onTextExtracted(text, buildSourceMeta(file, 'file'))
+      } else if (pdfExts.includes(ext)) {
+        const text = await extractPdfText(file)
+        onTextExtracted(text, buildSourceMeta(file, 'pdf'))
       } else {
-        throw new Error(`暂不支持 ${ext} 格式，支持的图片格式：JPG、PNG、GIF、WebP，支持的文本格式：TXT、MD`)
+        throw new Error(`暂不支持 ${ext} 格式，支持 PDF、图片（JPG/PNG/GIF/WebP）和文本文件（TXT/MD）`)
       }
     } catch (err) {
       onError(err.message || '文件处理失败')
@@ -335,7 +369,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif,.txt,.md,.text"
+        accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif,.txt,.md,.text"
         onChange={handleInputChange}
         className="hidden"
       />
@@ -361,7 +395,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
             <span className="text-gray-500"> 或拖拽文件到此处</span>
           </div>
           <div className="text-xs text-gray-400">
-            支持图片（JPG/PNG/GIF/WebP）AI识别文字，或文本文件（TXT/MD）
+            支持 PDF、图片（JPG/PNG/GIF/WebP）AI识别文字，或文本文件（TXT/MD）
           </div>
         </div>
       )}
