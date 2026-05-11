@@ -1,16 +1,32 @@
-# React + Vite
+# TestRecall
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+JLPT 日语考点记忆助手。支持粘贴/上传日语文本，调用 AI 提取单词、固定搭配、语法、阅读和听力考点，并按资料来源整理成清单。
 
-Currently, two official plugins are available:
+## 功能
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- 扫描：输入文本或上传图片/文本文件，提取 JLPT 考点
+- 考点：按上传文件/图片归档，整理为单词、语法、阅读、听力四类清单
+- 统计：查看类型分布、待复习数量和高频考点
+- 本地保存：学习数据存储在浏览器 localStorage
 
-## React Compiler
+## 本地运行
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
 
-## Expanding the ESLint configuration
+在 `.env` 中配置：
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+VITE_GROQ_API_KEY=your_groq_api_key_here
+```
+
+## 构建
+
+```bash
+npm run build
+```
+
+当前 Vite base 已配置为 `/testrecall/`，适合部署到 GitHub Pages 的 `https://<user>.github.io/testrecall/`。

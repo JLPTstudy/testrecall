@@ -11,6 +11,8 @@ const TYPE_COLORS = {
   grammar: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300' },
   collocation: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-300' },
   expression: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-300' },
+  reading: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-300' },
+  listening: { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-300' },
 }
 
 const TYPE_LABELS = {
@@ -18,16 +20,142 @@ const TYPE_LABELS = {
   grammar: '语法',
   collocation: '搭配',
   expression: '表达',
+  reading: '阅读',
+  listening: '听力',
 }
+
+const STUDY_SECTIONS = [
+  {
+    id: 'vocabulary',
+    title: '单词',
+    description: 'JLPT N1 高频词、固定搭配',
+    types: ['vocabulary', 'collocation'],
+  },
+  {
+    id: 'grammar',
+    title: '语法',
+    description: '句型、接续、语气和易混语法',
+    types: ['grammar'],
+  },
+  {
+    id: 'reading',
+    title: '阅读',
+    description: '文章结构、指代、连接词和阅读表达',
+    types: ['reading', 'expression'],
+  },
+  {
+    id: 'listening',
+    title: '听力',
+    description: '场景表达、口语反应和关键词',
+    types: ['listening'],
+  },
+]
+
+const normalizeTerm = (term) => term.trim().replace(/\s+/g, ' ')
+
+const getPointKey = (point) => `${point.type || 'vocabulary'}::${normalizeTerm(point.term || '').toLowerCase()}`
+
+const normalizeRelated = (related) => {
+  if (Array.isArray(related)) return related.filter(Boolean)
+  if (typeof related === 'string' && related.trim()) return [related.trim()]
+  return []
+}
+
+const defaultSource = {
+  id: 'manual',
+  title: '手动输入',
+  kind: 'text',
+  size: 0,
+}
+
+const getSourceLabel = (source) => {
+  if (!source) return defaultSource.title
+  if (source.title) return source.title
+  return source.kind === 'image' ? '图片上传' : '文本输入'
+}
+
+const getSourceKindLabel = (kind) => {
+  if (kind === 'image') return '图片'
+  if (kind === 'file') return '文件'
+  return '文本'
+}
+
+const formatFileSize = (size = 0) => {
+  if (!size) return ''
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+const toPoint = (item, idx, source = defaultSource) => {
+  const now = Date.now()
+  const term = normalizeTerm(item.term || '')
+  const type = TYPE_LABELS[item.type] ? item.type : 'vocabulary'
+
+  return {
+    id: `${now}-${idx}`,
+    type,
+    term,
+    reading: item.reading || null,
+    meaningCN: item.meaning_cn || item.meaningCN || null,
+    meaningEN: item.meaning_en || item.meaningEN || null,
+    partOfSpeech: item.part_of_speech || item.partOfSpeech || null,
+    connection: item.connection || null,
+    nuance: item.nuance || null,
+    level: item.level || null,
+    usage: item.usage || null,
+    example: item.example || null,
+    related: normalizeRelated(item.related),
+    sourceExam: item.source_exam || item.sourceExam || null,
+    source,
+    occurrenceCount: 1,
+    createdAt: new Date().toISOString(),
+    lastReviewedAt: null,
+    nextReviewAt: null,
+    reviewCount: 0,
+    memoryScore: 0,
+  }
+}
+
+const mergePoint = (existing, incoming) => ({
+  ...existing,
+  reading: existing.reading || incoming.reading,
+  meaningCN: existing.meaningCN || incoming.meaningCN,
+  meaningEN: existing.meaningEN || incoming.meaningEN,
+  partOfSpeech: existing.partOfSpeech || incoming.partOfSpeech,
+  connection: existing.connection || incoming.connection,
+  nuance: existing.nuance || incoming.nuance,
+  level: existing.level || incoming.level,
+  usage: existing.usage || incoming.usage,
+  example: existing.example || incoming.example,
+  related: Array.from(new Set([...(existing.related || []), ...(incoming.related || [])])),
+  sourceExam: existing.sourceExam || incoming.sourceExam,
+  source: existing.source || incoming.source,
+  occurrenceCount: (existing.occurrenceCount || 1) + 1,
+})
+
+const formatDate = (iso) => {
+  if (!iso) return '未复习'
+  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(iso))
+}
+
+const groupBySource = (points) => points.reduce((acc, point) => {
+  const source = point.source || defaultSource
+  const sourceId = source.id || getSourceLabel(source)
+  if (!acc[sourceId]) acc[sourceId] = { source, points: [] }
+  acc[sourceId].points.push(point)
+  return acc
+}, {})
 
 // AI Prompt for text analysis
 const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语文本中，提取值得记忆的考点。
 
 考点类型包括：
-1. vocabulary - 单词（名词、动词、形容词、副词等）
+1. vocabulary - 单词（名词、动词、形容词、副词等，优先识别JLPT N1高频词）
 2. grammar - 语法（句型、语法点）重点识别！
 3. collocation - 搭配（固定搭配、词组）
-4. expression - 表达（惯用表达、功能用语）
+4. reading - 阅读（阅读文章中值得总结的指代、转折、因果、文章结构、长难句）
+5. listening - 听力（听力场景表达、口语反应、关键词、音变或省略）
 
 【vocabulary 单词字段】
 - type: "vocabulary"
@@ -56,12 +184,20 @@ const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语
 - example: 例句
 - related: 相关搭配数组
 
-【expression 表达字段】
-- type: "expression"
-- term: 表达原文
-- meaning_cn: 中文意思
-- usage: 使用场景（何时使用）
-- example: 例句
+【reading 阅读字段】
+- type: "reading"
+- term: 阅读考点标题或原文片段
+- meaning_cn: 中文说明
+- usage: 出题点/解题提示
+- example: 原文例句或片段
+- related: 相关表达数组
+
+【listening 听力字段】
+- type: "listening"
+- term: 听力考点标题或口语表达
+- meaning_cn: 中文说明
+- usage: 使用场景/听力信号
+- example: 听力例句或常见对话片段
 - related: 相关表达数组
 
 请以JSON数组格式返回，只返回JSON，不要其他文字：
@@ -98,6 +234,14 @@ const saveData = (points) => {
   localStorage.setItem('testrecall_points', JSON.stringify(points))
 }
 
+const buildSourceMeta = (file, kind) => ({
+  id: `${kind}-${file.name}-${file.size}-${file.lastModified}`,
+  title: file.name,
+  kind,
+  size: file.size,
+  addedAt: new Date().toISOString(),
+})
+
 // File Upload Component
 function FileUpload({ onTextExtracted, onError, disabled }) {
   const [isDragging, setIsDragging] = useState(false)
@@ -126,7 +270,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
           })
           const text = result.data.text
           if (!text.trim()) throw new Error('未能从图片中提取到文字，请确保图片清晰且包含日语文本')
-          onTextExtracted(text.trim())
+          onTextExtracted(text.trim(), buildSourceMeta(file, 'image'))
         } catch (err) {
           onError(err.message || 'OCR识别失败')
         } finally {
@@ -136,7 +280,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
         // Text file: read directly
         const text = await file.text()
         if (!text.trim()) throw new Error('文件内容为空')
-        onTextExtracted(text)
+        onTextExtracted(text, buildSourceMeta(file, 'file'))
       } else {
         throw new Error(`暂不支持 ${ext} 格式，支持的图片格式：JPG、PNG、GIF、WebP，支持的文本格式：TXT、MD`)
       }
@@ -233,6 +377,7 @@ function ScanView({ onAddPoints }) {
   const [candidates, setCandidates] = useState([])
   const [selected, setSelected] = useState({})
   const [hasExtractedText, setHasExtractedText] = useState(false)
+  const [source, setSource] = useState(defaultSource)
 
   const handleAnalyze = async () => {
     if (!text.trim()) return
@@ -252,7 +397,7 @@ function ScanView({ onAddPoints }) {
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            { role: 'system', content: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、语法、搭配和表达。只返回JSON数组，不要其他文字。' },
+            { role: 'system', content: '你是JLPT日语考点提取专家，擅长从日语文本中识别值得记忆的单词、固定搭配、语法、阅读和听力考点。只返回JSON数组，不要其他文字。' },
             { role: 'user', content: AI_PROMPT + text }
           ],
           temperature: 0.3,
@@ -277,18 +422,7 @@ function ScanView({ onAddPoints }) {
 
       const parsed = JSON.parse(jsonStr)
       
-      const newCandidates = parsed.map((item, idx) => ({
-        id: Date.now() + idx,
-        type: item.type || 'vocabulary',
-        term: item.term || '',
-        reading: item.reading || null,
-        meaningCN: item.meaning_cn || null,
-        partOfSpeech: item.part_of_speech || null,
-        example: item.example || null,
-        related: item.related || null,
-        sourceExam: item.source_exam || null,
-        isSelected: true,
-      }))
+      const newCandidates = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
 
       setCandidates(newCandidates)
       const initialSelected = {}
@@ -309,30 +443,17 @@ function ScanView({ onAddPoints }) {
     const toAdd = candidates.filter(c => selected[c.id])
     if (toAdd.length === 0) return
     
-    const newPoints = toAdd.map(c => ({
-      id: c.id,
-      type: c.type,
-      term: c.term,
-      reading: c.reading,
-      meaningCN: c.meaningCN,
-      partOfSpeech: c.partOfSpeech,
-      example: c.example,
-      related: c.related,
-      sourceExam: c.sourceExam,
-      occurrenceCount: 1,
-      createdAt: new Date().toISOString(),
-      lastReviewedAt: null,
-    }))
-    
-    onAddPoints(newPoints)
+    onAddPoints(toAdd)
     setText('')
     setCandidates([])
     setSelected({})
     setHasExtractedText(false)
+    setSource(defaultSource)
   }
 
-  const handleTextExtracted = (extractedText) => {
+  const handleTextExtracted = (extractedText, sourceMeta) => {
     setText(extractedText)
+    setSource(sourceMeta || defaultSource)
     setHasExtractedText(true)
     setError('')
     setCandidates([])
@@ -345,6 +466,7 @@ function ScanView({ onAddPoints }) {
 
   const handleTextChange = (newText) => {
     setText(newText)
+    setSource(defaultSource)
     setHasExtractedText(false)
   }
 
@@ -372,7 +494,7 @@ function ScanView({ onAddPoints }) {
         {hasExtractedText && (
           <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
             <span>✓</span>
-            <span>文字已提取，可直接点击分析</span>
+            <span>已提取：{getSourceLabel(source)}，可直接点击分析</span>
           </div>
         )}
         
@@ -391,6 +513,12 @@ function ScanView({ onAddPoints }) {
             </span>
           ) : '🔍 AI 分析提取考点'}
         </button>
+
+        {!GROQ_KEY && (
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+            需要在环境变量里配置 VITE_GROQ_API_KEY，AI 分析功能才会工作。
+          </div>
+        )}
 
         {error && (
           <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
@@ -472,163 +600,122 @@ function ScanView({ onAddPoints }) {
   )
 }
 
-// Cards View Component
-function CardsView({ points }) {
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [isFlipped, setIsFlipped] = useState(false)
-  const [filter, setFilter] = useState('all')
-
-  const filteredPoints = points.filter(p => {
-    if (filter !== 'all' && p.type !== filter) return false
-    return true
-  })
-
-  const handleNext = () => {
-    if (currentIndex < filteredPoints.length - 1) {
-      setCurrentIndex(currentIndex + 1)
-      setIsFlipped(false)
-    }
-  }
-
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1)
-      setIsFlipped(false)
-    }
-  }
-
-  const handleFlip = () => {
-    setIsFlipped(!isFlipped)
-  }
+// Points List View Component
+function PointsListView({ points }) {
+  const sourceGroups = Object.values(groupBySource(points))
 
   if (points.length === 0) {
     return (
       <div className="max-w-2xl mx-auto text-center py-12">
         <div className="text-6xl mb-4">📚</div>
         <h2 className="text-2xl font-bold text-gray-800 mb-2">还没有考点</h2>
-        <p className="text-gray-500">去「扫描」页面添加一些考点吧</p>
+        <p className="text-gray-500">去「扫描」页面添加一些文件、图片或文本吧</p>
       </div>
     )
   }
-
-  if (filteredPoints.length === 0) {
-    return (
-      <div className="max-w-2xl mx-auto text-center py-12">
-        <div className="text-6xl mb-4">🔍</div>
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">没有匹配的考点</h2>
-        <p className="text-gray-500">试试切换筛选条件</p>
-      </div>
-    )
-  }
-
-  const current = filteredPoints[currentIndex]
-  const colors = TYPE_COLORS[current.type] || TYPE_COLORS.vocabulary
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">📚 考点卡片</h2>
+    <div className="max-w-5xl mx-auto">
+      <h2 className="text-2xl font-bold text-gray-800 mb-2">📚 考点列表</h2>
+      <p className="text-sm text-gray-500 mb-6">
+        按上传文件或图片归档，考点按单词、语法、阅读、听力整理。
+      </p>
 
-      {/* Filter */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {['all', 'vocabulary', 'grammar', 'collocation', 'expression'].map((type) => (
-          <button
-            key={type}
-            onClick={() => { setFilter(type); setCurrentIndex(0); setIsFlipped(false) }}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-              filter === type
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            {type === 'all' ? '全部' : TYPE_LABELS[type]}
-          </button>
-        ))}
-      </div>
-
-      {/* Progress */}
-      <div className="mb-4 text-center text-sm text-gray-500">
-        {currentIndex + 1} / {filteredPoints.length}
-      </div>
-
-      {/* Card */}
-      <div className="relative" style={{ height: '400px' }}>
-        <div
-          onClick={handleFlip}
-          className={`flip-card w-full h-full cursor-pointer ${isFlipped ? 'flipped' : ''}`}
-        >
-          <div className="flip-card-inner">
-            {/* Front */}
-            <div className="flip-card-front bg-white rounded-2xl shadow-lg border border-gray-200 p-8 flex flex-col items-center justify-center">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${colors.bg} ${colors.text} mb-4`}>
-                {TYPE_LABELS[current.type]}
-              </span>
-              <div className="text-4xl font-bold text-gray-900 text-center mb-2">
-                {current.term}
-              </div>
-              {current.reading && (
-                <div className="text-xl text-gray-500 mb-4">{current.reading}</div>
-              )}
-              <div className="text-sm text-gray-400 mt-4">点击卡片查看答案</div>
-            </div>
-
-            {/* Back */}
-            <div className="flip-card-back bg-white rounded-2xl shadow-lg border border-gray-200 p-8 flex flex-col items-center justify-center">
-              <div className="text-3xl font-bold text-gray-900 text-center mb-4">
-                {current.term}
-              </div>
-              {current.meaningCN && (
-                <div className="text-xl text-blue-600 text-center mb-4">
-                  {current.meaningCN}
-                </div>
-              )}
-              {current.partOfSpeech && (
-                <div className="text-sm text-gray-500 mb-2">{current.partOfSpeech}</div>
-              )}
-              {current.example && (
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
-                  <div className="text-sm text-gray-500 mb-1">例句</div>
-                  <div className="text-gray-700 japanese-text">{current.example}</div>
-                </div>
-              )}
-              {current.related && current.related.length > 0 && (
-                <div className="mt-4">
-                  <div className="text-sm text-gray-500 mb-2">相关词汇</div>
-                  <div className="flex gap-2 flex-wrap justify-center">
-                    {current.related.map((r, i) => (
-                      <span key={i} className="px-2 py-1 bg-gray-100 rounded text-sm text-gray-700">
-                        {r}
-                      </span>
-                    ))}
+      <div className="space-y-8">
+        {sourceGroups.map(({ source, points: sourcePoints }) => (
+          <section key={source.id || getSourceLabel(source)} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">{getSourceLabel(source)}</h3>
+                  <div className="text-sm text-gray-500">
+                    {getSourceKindLabel(source.kind)}{source.size ? ` · ${formatFileSize(source.size)}` : ''} · {sourcePoints.length} 个考点
                   </div>
                 </div>
-              )}
+                {source.addedAt && (
+                  <div className="text-sm text-gray-400">
+                    {formatDate(source.addedAt)}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Navigation */}
-      <div className="flex justify-center gap-4 mt-8">
-        <button
-          onClick={handlePrev}
-          disabled={currentIndex === 0}
-          className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          ← 上一张
-        </button>
-        <button
-          onClick={handleFlip}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-        >
-          {isFlipped ? '🔄 翻回正面' : '🔍 查看答案'}
-        </button>
-        <button
-          onClick={handleNext}
-          disabled={currentIndex === filteredPoints.length - 1}
-          className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          下一张 →
-        </button>
+            <div className="divide-y divide-gray-100">
+              {STUDY_SECTIONS.map((section, sectionIndex) => {
+                const sectionPoints = sourcePoints.filter(point => section.types.includes(point.type))
+                return (
+                  <div key={section.id} className="px-5 py-5">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <h4 className="text-base font-semibold text-gray-900">
+                          {sectionIndex + 1}、{section.title}
+                        </h4>
+                        <p className="text-sm text-gray-500">{section.description}</p>
+                      </div>
+                      <span className="text-sm text-gray-400 shrink-0">{sectionPoints.length} 条</span>
+                    </div>
+
+                    {sectionPoints.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="text-xs text-gray-500 border-b border-gray-100">
+                            <tr>
+                              <th className="py-2 pr-3 font-medium">考点</th>
+                              <th className="py-2 px-3 font-medium hidden md:table-cell">读音/级别</th>
+                              <th className="py-2 px-3 font-medium">中文说明</th>
+                              <th className="py-2 pl-3 font-medium hidden lg:table-cell">例句/提示</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {sectionPoints.map((point) => {
+                              const colors = TYPE_COLORS[point.type] || TYPE_COLORS.vocabulary
+                              return (
+                                <tr key={point.id} className="align-top">
+                                  <td className="py-3 pr-3">
+                                    <div className="font-semibold text-gray-900">{point.term}</div>
+                                    <div className="mt-1 flex gap-1.5 flex-wrap">
+                                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text}`}>
+                                        {TYPE_LABELS[point.type]}
+                                      </span>
+                                      {(point.occurrenceCount || 1) > 1 && (
+                                        <span className="px-2 py-0.5 rounded bg-gray-100 text-xs text-gray-500">
+                                          ×{point.occurrenceCount}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3 text-gray-600 hidden md:table-cell">
+                                    {point.reading || point.level || point.partOfSpeech || '-'}
+                                  </td>
+                                  <td className="py-3 px-3 text-gray-700">
+                                    {point.meaningCN || point.usage || point.nuance || '-'}
+                                    {point.connection && (
+                                      <div className="mt-1 text-xs text-gray-500">接续：{point.connection}</div>
+                                    )}
+                                  </td>
+                                  <td className="py-3 pl-3 text-gray-600 hidden lg:table-cell">
+                                    {point.example || point.usage || '-'}
+                                    {point.related?.length > 0 && (
+                                      <div className="mt-1 text-xs text-gray-400">
+                                        相关：{point.related.join('、')}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-400 py-2">暂无该类考点</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   )
@@ -641,21 +728,9 @@ function StatisticsView({ points }) {
     return acc
   }, {})
 
-  const highFrequency = points.filter(p => {
-    const existing = points.filter(x => x.term === p.term)
-    return existing.length >= 2
-  })
-
-  const uniquePoints = Array.from(new Set(points.map(p => p.term))).map(term => {
-    const same = points.filter(p => p.term === term)
-    return {
-      term,
-      count: same.length,
-      type: same[0].type,
-      reading: same[0].reading,
-      meaningCN: same[0].meaningCN,
-    }
-  }).sort((a, b) => b.count - a.count)
+  const dueCount = points.filter(p => !p.nextReviewAt || new Date(p.nextReviewAt) <= new Date()).length
+  const reviewedCount = points.filter(p => p.lastReviewedAt).length
+  const uniquePoints = [...points].sort((a, b) => (b.occurrenceCount || 1) - (a.occurrenceCount || 1))
 
   if (points.length === 0) {
     return (
@@ -678,12 +753,12 @@ function StatisticsView({ points }) {
           <div className="text-sm text-gray-500">总考点数</div>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-orange-600">{highFrequency.length}</div>
-          <div className="text-sm text-gray-500">高频考点</div>
+          <div className="text-3xl font-bold text-orange-600">{dueCount}</div>
+          <div className="text-sm text-gray-500">待复习</div>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-green-600">{uniquePoints.length}</div>
-          <div className="text-sm text-gray-500">不重复考点</div>
+          <div className="text-3xl font-bold text-green-600">{reviewedCount}</div>
+          <div className="text-sm text-gray-500">已复习</div>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="text-3xl font-bold text-purple-600">{Object.keys(typeCount).length}</div>
@@ -719,11 +794,11 @@ function StatisticsView({ points }) {
       </div>
 
       {/* High Frequency Points */}
-      {uniquePoints.filter(p => p.count >= 2).length > 0 && (
+      {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">🔥 高频考点</h3>
           <div className="space-y-2">
-            {uniquePoints.filter(p => p.count >= 2).slice(0, 10).map((p, idx) => {
+            {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).slice(0, 10).map((p, idx) => {
               const colors = TYPE_COLORS[p.type] || TYPE_COLORS.vocabulary
               return (
                 <div key={idx} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
@@ -736,7 +811,7 @@ function StatisticsView({ points }) {
                     {p.meaningCN && <div className="text-sm text-gray-600">{p.meaningCN}</div>}
                   </div>
                   <span className={`px-2 py-1 rounded text-sm font-bold ${colors.bg} ${colors.text}`}>
-                    ×{p.count}
+                    ×{p.occurrenceCount || 1}
                   </span>
                 </div>
               )
@@ -761,12 +836,9 @@ function App() {
     setPoints(prev => {
       const updated = [...prev]
       newPoints.forEach(newP => {
-        const existingIdx = updated.findIndex(p => p.term === newP.term)
+        const existingIdx = updated.findIndex(p => getPointKey(p) === getPointKey(newP))
         if (existingIdx >= 0) {
-          updated[existingIdx] = {
-            ...updated[existingIdx],
-            occurrenceCount: updated[existingIdx].occurrenceCount + 1,
-          }
+          updated[existingIdx] = mergePoint(updated[existingIdx], newP)
         } else {
           updated.push(newP)
         }
@@ -806,7 +878,7 @@ function App() {
           <div className="flex gap-1">
             {[
               { id: 'scan', icon: '📷', label: '扫描' },
-              { id: 'cards', icon: '📚', label: '卡片' },
+              { id: 'points', icon: '📚', label: '考点' },
               { id: 'stats', icon: '📊', label: '统计' },
             ].map((item) => (
               <button
@@ -829,7 +901,7 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} />}
-        {view === 'cards' && <CardsView points={points} />}
+        {view === 'points' && <PointsListView points={points} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
