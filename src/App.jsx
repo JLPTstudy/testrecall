@@ -231,14 +231,14 @@ const imageToBase64 = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file)
 })
 
-const callGroq = async (messages, model) => {
+const callGroq = async (messages, model, temperature = 0.2) => {
   const response = await fetch(GROQ_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${GROQ_KEY}`,
     },
-    body: JSON.stringify({ model, messages, temperature: 0, seed: 42, max_tokens: 8192 }),
+    body: JSON.stringify({ model, messages, temperature, max_tokens: 8192 }),
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
@@ -283,6 +283,7 @@ const normalizeDictForms = async (candidates) => {
         },
       ],
       GROQ_TEXT_MODEL,
+      0,
     )
     const normalized = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] || '[]')
     const normMap = Object.fromEntries(normalized.map(n => [n.id, n.term]).filter(([, t]) => t))
