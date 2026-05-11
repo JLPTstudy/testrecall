@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 // API Key - set VITE_OPENAI_API_KEY in .env file
 const API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
@@ -19,7 +19,7 @@ const TYPE_LABELS = {
   expression: '表达',
 }
 
-// AI Prompt
+// AI Prompt for text analysis
 const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语文本中，提取值得记忆的考点。
 
 考点类型包括：
@@ -57,14 +57,185 @@ const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语
 待分析文本：
 `
 
+// AI Prompt for image OCR
+const IMAGE_OCR_PROMPT = `你是一个日语文字识别专家。请从这张图片中提取所有日语文本内容。
+
+要求：
+1. 完整提取图片中的所有日语文本
+2. 保持原文格式和换行
+3. 如果图片中包含考试信息（如JLPT、日期等），也一并提取
+4. 只返回提取到的日语文本，不要解释
+
+提取到的日语文本：
+`
+
 // Load/Save data from localStorage
 const loadData = () => {
-  const saved = localStorage.getItem('testrecall_points')
-  return saved ? JSON.parse(saved) : []
+  try {
+    const saved = localStorage.getItem('testrecall_points')
+    return saved ? JSON.parse(saved) : []
+  } catch {
+    return []
+  }
 }
 
 const saveData = (points) => {
   localStorage.setItem('testrecall_points', JSON.stringify(points))
+}
+
+// File Upload Component
+function FileUpload({ onTextExtracted, onError, disabled }) {
+  const [isDragging, setIsDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const handleFile = async (file) => {
+    if (!file) return
+    setUploading(true)
+    setPreviewUrl(null)
+
+    try {
+      const ext = file.name.split('.').pop().toLowerCase()
+      const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif']
+      const textExts = ['txt', 'md', 'text']
+
+      if (imageExts.includes(ext)) {
+        // Image: use AI vision OCR
+        const base64 = await fileToBase64(file)
+        setPreviewUrl(base64)
+
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'user', content: [
+                { type: 'text', text: IMAGE_OCR_PROMPT },
+                { type: 'image_url', image_url: { url: `data:${file.type};base64,${base64}` } }
+              ]}
+            ],
+            max_tokens: 4096,
+          }),
+        })
+
+        if (!response.ok) throw new Error('OCR请求失败')
+        const data = await response.json()
+        const extractedText = data.choices?.[0]?.message?.content
+
+        if (!extractedText || !extractedText.trim()) {
+          throw new Error('未能从图片中提取到文字，请确保图片清晰且包含日语文本')
+        }
+
+        onTextExtracted(extractedText.trim())
+      } else if (textExts.includes(ext)) {
+        // Text file: read directly
+        const text = await file.text()
+        if (!text.trim()) throw new Error('文件内容为空')
+        onTextExtracted(text)
+      } else {
+        throw new Error(`暂不支持 ${ext} 格式，支持的图片格式：JPG、PNG、GIF、WebP，支持的文本格式：TXT、MD`)
+      }
+    } catch (err) {
+      onError(err.message || '文件处理失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result
+        // Remove data URL prefix for API
+        const base64 = result.split(',')[1]
+        resolve(base64)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+    if (disabled || uploading) return
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    if (!disabled && !uploading) setIsDragging(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleClick = () => {
+    if (!disabled && !uploading) fileInputRef.current?.click()
+  }
+
+  const handleInputChange = (e) => {
+    const file = e.target.files[0]
+    if (file) handleFile(file)
+    e.target.value = ''
+  }
+
+  return (
+    <div
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onClick={handleClick}
+      className={`mt-4 border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+        isDragging
+          ? 'border-blue-500 bg-blue-50'
+          : 'border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50'
+      } ${disabled || uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.heic,.heif,.txt,.md,.text"
+        onChange={handleInputChange}
+        className="hidden"
+      />
+
+      {uploading ? (
+        <div className="flex flex-col items-center gap-2">
+          <svg className="animate-spin h-8 w-8 text-blue-600" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-gray-600">正在识别文字...</span>
+        </div>
+      ) : previewUrl ? (
+        <div className="flex flex-col items-center gap-2">
+          <img src={previewUrl} alt="Preview" className="max-h-40 rounded-lg mx-auto" />
+          <span className="text-sm text-gray-500">图片已识别，点击可重新上传</span>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-2">
+          <div className="text-4xl">📁</div>
+          <div>
+            <span className="text-blue-600 font-medium">点击上传</span>
+            <span className="text-gray-500"> 或拖拽文件到此处</span>
+          </div>
+          <div className="text-xs text-gray-400">
+            支持图片（JPG/PNG/GIF/WebP）AI识别文字，或文本文件（TXT/MD）
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Scan View Component
@@ -74,6 +245,7 @@ function ScanView({ onAddPoints }) {
   const [error, setError] = useState('')
   const [candidates, setCandidates] = useState([])
   const [selected, setSelected] = useState({})
+  const [hasExtractedText, setHasExtractedText] = useState(false)
 
   const handleAnalyze = async () => {
     if (!text.trim()) return
@@ -165,6 +337,24 @@ function ScanView({ onAddPoints }) {
     setText('')
     setCandidates([])
     setSelected({})
+    setHasExtractedText(false)
+  }
+
+  const handleTextExtracted = (extractedText) => {
+    setText(extractedText)
+    setHasExtractedText(true)
+    setError('')
+    setCandidates([])
+    setSelected({})
+  }
+
+  const handleFileError = (errMsg) => {
+    setError(errMsg)
+  }
+
+  const handleTextChange = (newText) => {
+    setText(newText)
+    setHasExtractedText(false)
   }
 
   return (
@@ -177,10 +367,23 @@ function ScanView({ onAddPoints }) {
         </label>
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => handleTextChange(e.target.value)}
           placeholder="粘贴或输入日语文本..."
           className="w-full h-40 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none japanese-text"
         />
+        
+        <FileUpload
+          onTextExtracted={handleTextExtracted}
+          onError={handleFileError}
+          disabled={loading}
+        />
+        
+        {hasExtractedText && (
+          <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
+            <span>✓</span>
+            <span>文字已提取，可直接点击分析</span>
+          </div>
+        )}
         
         <button
           onClick={handleAnalyze}
@@ -283,7 +486,6 @@ function CardsView({ points }) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isFlipped, setIsFlipped] = useState(false)
   const [filter, setFilter] = useState('all')
-  const [showOnlyUnmastered, setShowOnlyUnmastered] = useState(false)
 
   const filteredPoints = points.filter(p => {
     if (filter !== 'all' && p.type !== filter) return false
@@ -568,16 +770,13 @@ function App() {
     setPoints(prev => {
       const updated = [...prev]
       newPoints.forEach(newP => {
-        // Check if same term exists
         const existingIdx = updated.findIndex(p => p.term === newP.term)
         if (existingIdx >= 0) {
-          // Increment occurrence count
           updated[existingIdx] = {
             ...updated[existingIdx],
             occurrenceCount: updated[existingIdx].occurrenceCount + 1,
           }
         } else {
-          // Add new point
           updated.push(newP)
         }
       })
