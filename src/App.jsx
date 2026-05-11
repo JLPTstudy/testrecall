@@ -158,17 +158,6 @@ const AI_PROMPT = `你是JLPT日语考点提取专家。从日语文本中提取
 
 返回JSON数组，只返回JSON：
 [{"type":"vocabulary","term":"单词","meaning_cn":"中文意思"}]`
-    "meaning_en": "have done something before",
-    "connection": "动词た形 + ことがある",
-    "nuance": "表示过去的经验，口语中常省略「が」",
-    "level": "N4",
-    "example": "日本に行ったことがある。",
-    "related": ["たことがない", "ることがある"]
-  }
-]
-
-待分析文本：
-`
 
 
 // Load/Save data from localStorage
