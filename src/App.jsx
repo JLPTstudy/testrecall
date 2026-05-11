@@ -152,66 +152,12 @@ const groupBySource = (points) => points.reduce((acc, point) => {
 }, {})
 
 // AI Prompt for text analysis
-const AI_PROMPT = `你是一个JLPT日语考点提取专家。请从以下日语文本中，提取值得记忆的考点。
-文本可能同时包含教材正文、OCR识别出的手写笔记、中文批注、圈画旁边的备注。请特别关注这些人工标记和笔记，因为它们通常代表用户认为重要的考点。
+const AI_PROMPT = `你是JLPT日语考点提取专家。从日语文本中提取考点。
 
-考点类型包括：
-1. vocabulary - 单词（名词、动词、形容词、副词等，优先识别JLPT N1高频词）
-2. grammar - 语法（句型、语法点）重点识别！
-3. collocation - 搭配（固定搭配、词组）
-4. reading - 阅读（阅读文章中值得总结的指代、转折、因果、文章结构、长难句）
-5. listening - 听力（听力场景表达、口语反应、关键词、音变或省略）
+类型：vocabulary(单词)、grammar(语法)、collocation(搭配)、expression(表达)、reading(阅读)、listening(听力)
 
-【vocabulary 单词字段】
-- type: "vocabulary"
-- term: 单词原文
-- reading: 读音（平假名/片假名）
-- meaning_cn: 中文意思
-- part_of_speech: 词性（名词/动词/形容词/副词等）
-- example: 一个例句
-- related: 相关词汇数组
-
-【grammar 语法字段】重点！
-- type: "grammar"
-- term: 语法原文（如「たことがある」「ものではない」）
-- meaning_cn: 中文意思/翻译
-- meaning_en: 英文补充
-- connection: 接续（如「动词た形 + ことがある」）
-- nuance: 语气/用法说明（书面/口语/正式/随意等）
-- level: N5/N4/N3/N2/N1
-- example: 一个例句（包含该语法的完整例句）
-- related: 相关语法点数组
-
-【collocation 搭配字段】
-- type: "collocation"
-- term: 搭配原文
-- meaning_cn: 中文意思
-- example: 例句
-- related: 相关搭配数组
-
-【reading 阅读字段】
-- type: "reading"
-- term: 阅读考点标题或原文片段
-- meaning_cn: 中文说明
-- usage: 出题点/解题提示
-- example: 原文例句或片段
-- related: 相关表达数组
-
-【listening 听力字段】
-- type: "listening"
-- term: 听力考点标题或口语表达
-- meaning_cn: 中文说明
-- usage: 使用场景/听力信号
-- example: 听力例句或常见对话片段
-- related: 相关表达数组
-
-请以JSON数组格式返回，只返回JSON，不要其他文字：
-
-[
-  {
-    "type": "grammar",
-    "term": "たことがある",
-    "meaning_cn": "曾经...过",
+返回JSON数组，只返回JSON：
+[{"type":"vocabulary","term":"单词","meaning_cn":"中文意思"}]`
     "meaning_en": "have done something before",
     "connection": "动词た形 + ことがある",
     "nuance": "表示过去的经验，口语中常省略「が」",
@@ -465,7 +411,7 @@ function ScanView({ onAddPoints }) {
             { role: 'user', content: AI_PROMPT + text }
           ],
           temperature: 0.3,
-          max_tokens: 4096,
+          max_tokens: 2048,
         }),
       })
 
