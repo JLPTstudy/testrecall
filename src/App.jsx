@@ -14,8 +14,6 @@ const TYPE_COLORS = {
   grammar: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300' },
   collocation: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-300' },
   expression: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-300' },
-  reading: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-300' },
-  listening: { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-300' },
 }
 
 const TYPE_LABELS = {
@@ -23,8 +21,6 @@ const TYPE_LABELS = {
   grammar: '语法',
   collocation: '搭配',
   expression: '表达',
-  reading: '阅读',
-  listening: '听力',
 }
 
 const STUDY_SECTIONS = [
@@ -39,18 +35,6 @@ const STUDY_SECTIONS = [
     title: '语法',
     description: '句型、接续、语气和易混语法',
     types: ['grammar'],
-  },
-  {
-    id: 'reading',
-    title: '阅读',
-    description: '文章结构、指代、连接词和阅读表达',
-    types: ['reading', 'expression'],
-  },
-  {
-    id: 'listening',
-    title: '听力',
-    description: '场景表达、口语反应和关键词',
-    types: ['listening'],
   },
 ]
 
@@ -154,7 +138,7 @@ const groupBySource = (points) => points.reduce((acc, point) => {
 // AI Prompt for text analysis
 const AI_PROMPT = `你是JLPT日语考点提取专家。
 
-类型：vocabulary(N1高频词)、grammar(语法句型)、collocation(搭配)、reading(阅读)、listening(听力)
+类型：vocabulary(N1高频词)、grammar(语法句型)、collocation(搭配)
 
 【输出格式】
 只返回JSON数组，最多15个考点。每个考点只需：term(原文)、meaning_cn(中文)、type(类型)
