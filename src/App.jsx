@@ -181,8 +181,7 @@ const SHARED_RULES = `
 - vocabulary/collocation：reading字段填辞书形假名读音
 - grammar：term写完整句型，connection字段写接续方式（如：名词/普通形+にもかかわらず）
 - 不要提取「文法」「語彙」「読解」「聴解」「問題」等章节标题
-- 提取完毕后回顾一遍是否有遗漏，再输出
-- 输出顺序：按考点在原文/图片中出现的先后顺序排列（问题14的考点先输出，然后是问题15，以此类推），不要打乱顺序`
+- 提取完毕后回顾一遍是否有遗漏，再输出`
 
 const TEXT_USER_PROMPT = `请从以下文本中提取考点，不得遗漏。
 ${SHARED_RULES}
@@ -291,6 +290,17 @@ const normalizeDictForms = async (candidates) => {
   } catch {
     return candidates
   }
+}
+
+const sortBySourceOrder = (candidates, sourceText) => {
+  if (!sourceText) return candidates
+  const text = sourceText.toLowerCase()
+  const pos = (term) => {
+    const t = term.toLowerCase()
+    const idx = text.indexOf(t)
+    return idx === -1 ? Infinity : idx
+  }
+  return [...candidates].sort((a, b) => pos(a.term) - pos(b.term))
 }
 
 const extractImageText = async (imageLike) => {
@@ -518,6 +528,7 @@ function ScanView({ onAddPoints }) {
       const parsed = parseGroqResponse(content)
       let newCandidates = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
       newCandidates = await normalizeDictForms(newCandidates)
+      newCandidates = sortBySourceOrder(newCandidates, imageDataUrl ? null : text)
       setCandidates(newCandidates)
 
       const initialSelected = {}
