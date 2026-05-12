@@ -277,6 +277,32 @@ const callGeminiVision = async (imageDataUrl, prompt) => {
   return content
 }
 
+// Gemini text-only fallback (same model as vision, no image parts)
+const callGeminiText = async (messages, temperature = 0.2) => {
+  const prompt = messages.map(m =>
+    typeof m.content === 'string' ? m.content : (m.content || []).map(c => c.text || '').join('\n')
+  ).join('\n\n')
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature, maxOutputTokens: 8192 },
+      }),
+    }
+  )
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || `Gemini API错误 (${response.status})`)
+  }
+  const data = await response.json()
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!content) throw new Error('Gemini未返回有效内容')
+  return content
+}
+
 const callGroq = async (messages, model, temperature = 0.2) => {
   const attempt = async (m) => {
     const response = await fetch(GROQ_URL, {
@@ -289,9 +315,11 @@ const callGroq = async (messages, model, temperature = 0.2) => {
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      // Auto-fallback on rate-limit (429) if not already using the fallback model
-      if (response.status === 429 && m !== GROQ_FALLBACK_MODEL) {
-        return attempt(GROQ_FALLBACK_MODEL)
+      if (response.status === 429) {
+        if (m !== GROQ_FALLBACK_MODEL) return attempt(GROQ_FALLBACK_MODEL)
+        // Both Groq models exhausted — fall back to Gemini if key is configured
+        if (GEMINI_KEY) return callGeminiText(messages, temperature)
+        throw new Error('Groq 每日 token 已用尽，请明天再试或配置 Gemini API Key')
       }
       throw new Error(err.error?.message || 'Groq API请求失败')
     }
@@ -432,7 +460,7 @@ const fillMissingExamples = async (points, onUpdate, onProgress) => {
   const toFill = points.filter(p => !p.example || !p.exampleCN || !p.example.includes('['))
   if (toFill.length === 0) return 0
 
-  const BATCH = 20
+  const BATCH = 8
   let filled = 0
   for (let i = 0; i < toFill.length; i += BATCH) {
     const batch = toFill.slice(i, i + BATCH)
@@ -704,10 +732,12 @@ function ScanView({ onAddPoints }) {
               'meta-llama/llama-4-scout-17b-16e-instruct',
             )
       } else {
+        const MAX_CHARS = 12000
+        const truncated = text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) : text
         content = await callGroq(
           [
             { role: 'system', content: TEXT_SYSTEM_PROMPT },
-            { role: 'user', content: textPrompt + text },
+            { role: 'user', content: textPrompt + truncated },
           ],
           GROQ_TEXT_MODEL,
         )
