@@ -10,8 +10,8 @@ const GROQ_FALLBACK_MODEL = 'llama-3.1-8b-instant'
 
 // Gemini API — image vision (much better Japanese OCR, free tier)
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-const GEMINI_VISION_MODEL = 'gemini-2.5-flash'
-const GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash'
+const GEMINI_VISION_MODEL = 'gemini-2.0-flash'
+const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash'
 
 const OCR_LANGS = 'jpn+chi_sim+eng'
 const PDF_OCR_SCALE = 2
@@ -267,11 +267,7 @@ const callGeminiAPI = async (parts, temperature = 0.2) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts }],
-            generationConfig: {
-              temperature,
-              maxOutputTokens: 65536,
-              thinkingConfig: { thinkingBudget: 0 },
-            },
+            generationConfig: { temperature, maxOutputTokens: 65536 },
           }),
         }
       )
@@ -288,7 +284,8 @@ const callGeminiAPI = async (parts, temperature = 0.2) => {
         throw new Error(msg)
       }
       const data = await response.json()
-      const content = data.candidates?.[0]?.content?.parts?.[0]?.text
+      const parts = data.candidates?.[0]?.content?.parts || []
+      const content = (parts.find(p => !p.thought) || parts[0])?.text
       if (!content) throw new Error('Gemini未返回有效内容')
       return content
     }
