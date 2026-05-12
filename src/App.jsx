@@ -2,11 +2,16 @@ import { useState, useEffect, useRef } from 'react'
 import Tesseract from 'tesseract.js'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-// Groq API (free tier)
+// Groq API — text extraction & normalization
 const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || ''
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const GROQ_TEXT_MODEL = 'llama-3.3-70b-versatile'
-const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+// Gemini API — image vision (much better Japanese OCR, free tier)
+const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+const GEMINI_VISION_MODEL = 'gemini-2.0-flash'
+
 const OCR_LANGS = 'jpn+chi_sim+eng'
 const PDF_OCR_SCALE = 2
 
@@ -195,6 +200,25 @@ const imageToBase64 = (file) => new Promise((resolve, reject) => {
   reader.onerror = reject
   reader.readAsDataURL(file)
 })
+
+const callGemini = async (messages, temperature = 0.2) => {
+  const response = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GEMINI_KEY}`,
+    },
+    body: JSON.stringify({ model: GEMINI_VISION_MODEL, messages, temperature, max_tokens: 8192 }),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || 'Gemini API请求失败')
+  }
+  const data = await response.json()
+  const content = data.choices?.[0]?.message?.content
+  if (!content) throw new Error('未获取到有效响应')
+  return content
+}
 
 const callGroq = async (messages, model, temperature = 0.2) => {
   const response = await fetch(GROQ_URL, {
@@ -474,12 +498,11 @@ function ScanView({ onAddPoints }) {
     try {
       let content
       if (imageDataUrl) {
-        content = await callGroq(
+        content = await callGemini(
           [{ role: 'user', content: [
             { type: 'image_url', image_url: { url: imageDataUrl } },
             { type: 'text', text: VISION_PROMPT },
           ]}],
-          GROQ_VISION_MODEL,
         )
       } else {
         content = await callGroq(
@@ -604,9 +627,10 @@ function ScanView({ onAddPoints }) {
           ) : '🔍 AI 分析提取考点'}
         </button>
 
-        {!GROQ_KEY && (
+        {(!GROQ_KEY || !GEMINI_KEY) && (
           <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            需要在环境变量里配置 VITE_GROQ_API_KEY，AI 分析功能才会工作。
+            {!GROQ_KEY && <div>需要配置 <code>VITE_GROQ_API_KEY</code>（文字提取）</div>}
+            {!GEMINI_KEY && <div>需要配置 <code>VITE_GEMINI_API_KEY</code>（图片识别，从 aistudio.google.com 免费获取）</div>}
           </div>
         )}
 
