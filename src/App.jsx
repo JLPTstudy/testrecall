@@ -506,7 +506,15 @@ function ScanView({ onAddPoints }) {
     try {
       let content
       if (imageDataUrl) {
-        content = await callGeminiVision(imageDataUrl, VISION_PROMPT)
+        content = GEMINI_KEY
+          ? await callGeminiVision(imageDataUrl, VISION_PROMPT)
+          : await callGroq(
+              [{ role: 'user', content: [
+                { type: 'image_url', image_url: { url: imageDataUrl } },
+                { type: 'text', text: VISION_PROMPT },
+              ]}],
+              'meta-llama/llama-4-scout-17b-16e-instruct',
+            )
       } else {
         content = await callGroq(
           [
