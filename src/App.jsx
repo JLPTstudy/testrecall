@@ -1039,6 +1039,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
   const [showAddForm, setShowAddForm] = useState(false)
   const [filling, setFilling] = useState(false)
   const [fillProgress, setFillProgress] = useState(null) // { done, total }
+  const [collapsedSections, setCollapsedSections] = useState({}) // key: `${sourceId}-${sectionId}`
   const [editingSourceId, setEditingSourceId] = useState(null)
   const [editingSourceName, setEditingSourceName] = useState('')
   const tagEditorRef = useRef(null)
@@ -1258,19 +1259,26 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
             <div className="divide-y divide-gray-100">
               {STUDY_SECTIONS.map((section, sectionIndex) => {
                 const sectionPoints = sourcePoints.filter(point => section.types.includes(point.type))
+                const collapseKey = `${source.id}-${section.id}`
+                const collapsed = !!collapsedSections[collapseKey]
+                const toggleCollapse = () => setCollapsedSections(prev => ({ ...prev, [collapseKey]: !prev[collapseKey] }))
                 return (
-                  <div key={section.id} className="px-5 py-5">
-                    <div className="flex items-start justify-between gap-4 mb-3">
+                  <div key={section.id} className="px-5 py-4">
+                    <button
+                      onClick={toggleCollapse}
+                      className="w-full flex items-center justify-between gap-4 text-left mb-0"
+                    >
                       <div>
                         <h4 className="text-base font-semibold text-gray-900">
                           {sectionIndex + 1}、{section.title}
+                          <span className="ml-2 text-sm font-normal text-gray-400">{sectionPoints.length} 条</span>
                         </h4>
-                        <p className="text-sm text-gray-500">{section.description}</p>
+                        {!collapsed && <p className="text-sm text-gray-500">{section.description}</p>}
                       </div>
-                      <span className="text-sm text-gray-400 shrink-0">{sectionPoints.length} 条</span>
-                    </div>
+                      <span className="text-gray-400 text-lg shrink-0">{collapsed ? '▶' : '▼'}</span>
+                    </button>
 
-                    {sectionPoints.length > 0 ? (
+                    {!collapsed && sectionPoints.length > 0 ? (
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                           <thead className="text-xs text-gray-500 border-b border-gray-100">
@@ -1365,9 +1373,9 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                           </tbody>
                         </table>
                       </div>
-                    ) : (
+                    ) : (!collapsed && (
                       <div className="text-sm text-gray-400 py-2">暂无该类考点</div>
-                    )}
+                    ))}
                   </div>
                 )
               })}
