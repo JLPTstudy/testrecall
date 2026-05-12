@@ -140,67 +140,29 @@ const groupBySource = (points) => points.reduce((acc, point) => {
 // AI prompts
 const TEXT_SYSTEM_PROMPT = `你是JLPT日语考点提取专家，只返回JSON数组，不要任何其他文字。`
 
-const SHARED_RULES = `
-【第一步：判断类型（每个考点必须先过这个分类）】
+const EXTRACTION_RULES = `
+类型：grammar（N1语法句型/助词接续形式）| collocation（多词惯用表达，各词字面义≠整体义）| vocabulary（其余单个词汇）
 
-▸ collocation（固定搭配/惯用句）— 优先判断
-  条件：由2个以上词构成，且整体含义≠各词字面相加。测试方法：把每个词单独查词典，如果拼不出这个短语的实际意思，就是collocation。
-  例：気が置けない（不能=気+置けない字面义）、手が込む、目を見張る、腹を割る、一石二鳥
+提取要求：
+1. 题干中被考察的关键词最重要，必须提取
+2. 4个选项全部检查；选项是完整句子时，拆出关键词逐个提取，不要整句归为collocation
+3. 只排除する/ある/いる/行く/来る 等极基础动词、助词、数字，其余词汇都要抓
+4. N1语法句型一个不能漏；term写辞书形；不提取「文法」「語彙」「読解」「聴解」等标题`
 
-▸ grammar（语法句型）— 次优先
-  条件：含助词组合或接续形式，是N1语法句型。
-  例：〜にもかかわらず、〜を皮切りに、〜に際して、〜ずにはおかない、〜に相違ない
+const JSON_EXAMPLE = `[{"term":"もくろむ","type":"vocabulary","reading":"もくろむ","meaning_cn":"图谋、策划"},
+ {"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...","connection":"普通形+にもかかわらず"},
+ {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束、可以推心置腹"}]`
 
-▸ vocabulary（单词）— 不满足以上两者才归此类
-  条件：单个独立词汇（名词/动词/形容词/副词），能单独在词典中查到。
-  例：画期的、製作する、甚だしい、手法、把握する
+const TEXT_USER_PROMPT = `从以下文本提取所有考点，不得遗漏。${EXTRACTION_RULES}
 
-【第二步：提取范围与方法】
+只返回JSON数组：${JSON_EXAMPLE}
 
-▸ 题干句（问题句）——最高优先级
-  题干句中被考察的词（通常是句中最难、意思最特殊的那个词）是整道题的核心，必须第一个提取。
-  例：「あの企業は海外市場への進出をもくろんでいる」→ もくろむ 是被考察词，必须提取为 vocabulary。
-  例：「問題を解決するために手がかりが欲しい」→ 手がかり 是被考察词，必须提取为 vocabulary（注意：手がかり是一个单词，意为"线索"，不是惯用句手が掛かる）。
-
-▸ 选项内容——拆词提取，禁止整句归为搭配
-  选项如果是一整句话（如：最近ではめずらしい、評価が高まっている、便利で役に立っている），
-  【不要把整句归为 collocation】，应拆出其中的关键词汇分别作为 vocabulary 提取。
-  例：选项「計画して」→ 提取 計画する；「果たして」→ 提取 果たす；「めずらしい」→ 提取 めずらしい。
-
-▸ 提取范围
-  - 不因"太普通"而跳过（もくろむ、手がかり、にわかに、製作する 等都要抓）
-  - 只排除极基础词：する/ある/いる/来る/行く/見る 等超高频基础动词、助词（が/は/で/に/て）、数字
-  - 所有N1语法句型必须提取，哪怕只出现一次，绝对不能遗漏
-
-▸ 读字准确性（视觉识别）
-  每个汉字必须仔细辨认，不能用相似字替换。
-  例：画期的 ≠ 計画的；柔軟 ≠ 楽天；値上がり ≠ 価値が上がり。如果字迹不清，保留最接近的读法，不要凭感觉替换成其他词。
-
-【第三步：字段填写】
-- 词汇以变形出现时，term写辞书形（製作された→製作する、見かねた→見かねる、悔しくて→悔しい）
-- vocabulary/collocation：reading字段填辞书形假名读音
-- grammar：term写完整句型，connection字段写接续方式（如：名词/普通形+にもかかわらず）
-- 不要提取「文法」「語彙」「読解」「聴解」「問題」等章节标题
-- 提取完毕后回顾一遍是否有遗漏，再输出`
-
-const TEXT_USER_PROMPT = `请从以下文本中提取考点，不得遗漏。
-${SHARED_RULES}
-
-输出JSON数组（无其他文字）：
-[{"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...、即使...也","connection":"名词/普通形+にもかかわらず"},
- {"term":"甚だしい","type":"vocabulary","reading":"はなはだしい","meaning_cn":"极其、甚"},
- {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束的、可以推心置腹的"}]
-
-待分析文本：
+文本：
 `
 
-const VISION_PROMPT = `这是JLPT日语考试题目图片。请仔细识别图片中所有文字，提取考点，不得遗漏。
-${SHARED_RULES}
+const VISION_PROMPT = `这是JLPT日语考试题目图片，仔细识别所有文字，提取所有考点，不得遗漏。${EXTRACTION_RULES}
 
-输出JSON数组（无其他文字）：
-[{"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...、即使...也","connection":"名词/普通形+にもかかわらず"},
- {"term":"甚だしい","type":"vocabulary","reading":"はなはだしい","meaning_cn":"极其、甚"},
- {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束的、可以推心置腹的"}]`
+只返回JSON数组：${JSON_EXAMPLE}`
 
 // Load/Save data from localStorage
 const loadData = () => {
@@ -527,14 +489,18 @@ function ScanView({ onAddPoints }) {
       }
 
       const parsed = parseGroqResponse(content)
-      let newCandidates = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
-      newCandidates = await normalizeDictForms(newCandidates)
-      newCandidates = sortBySourceOrder(newCandidates, imageDataUrl ? null : text)
-      setCandidates(newCandidates)
+      const extracted = parsed.map((item, idx) => toPoint(item, idx, source)).filter(item => item.term)
+      const sorted = sortBySourceOrder(extracted, imageDataUrl ? null : text)
 
+      setCandidates(sorted)
       const initialSelected = {}
-      newCandidates.forEach(c => { initialSelected[c.id] = true })
+      sorted.forEach(c => { initialSelected[c.id] = true })
       setSelected(initialSelected)
+
+      // normalize dict forms in background, update terms when done
+      normalizeDictForms(sorted).then(normalized => {
+        setCandidates(normalized)
+      }).catch(() => {})
     } catch (err) {
       setError(err.message || '分析失败，请重试')
     } finally {
