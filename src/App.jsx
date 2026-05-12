@@ -209,6 +209,17 @@ const saveUserTags = (tags) => {
   localStorage.setItem('testrecall_tags', JSON.stringify(tags))
 }
 
+const loadSourceNames = () => {
+  try {
+    const saved = localStorage.getItem('testrecall_source_names')
+    return saved ? JSON.parse(saved) : {}
+  } catch { return {} }
+}
+
+const saveSourceNames = (names) => {
+  localStorage.setItem('testrecall_source_names', JSON.stringify(names))
+}
+
 const buildSourceMeta = (file, kind) => ({
   id: `${kind}-${file.name}-${file.size}-${file.lastModified}`,
   title: file.name,
@@ -905,10 +916,12 @@ function TagEditor({ point, userTags, onToggleTag, onCreateTag, onClose, editorR
 }
 
 // Points List View Component
-function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint }) {
+function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource }) {
   const [activeTagFilter, setActiveTagFilter] = useState(null)
   const [openEditorId, setOpenEditorId] = useState(null)
   const [showAddForm, setShowAddForm] = useState(false)
+  const [editingSourceId, setEditingSourceId] = useState(null)
+  const [editingSourceName, setEditingSourceName] = useState('')
   const editorRef = useRef(null)
 
   useEffect(() => {
@@ -936,6 +949,18 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
     if (activeTagFilter) point.customTags = [activeTagFilter]
     onAddPoint(point)
   }
+
+  const startRename = (sourceId, currentName) => {
+    setEditingSourceId(sourceId)
+    setEditingSourceName(currentName)
+  }
+
+  const commitRename = () => {
+    if (editingSourceId) onRenameSource(editingSourceId, editingSourceName.trim())
+    setEditingSourceId(null)
+  }
+
+  const getDisplayName = (source) => sourceNames[source.id] || getSourceLabel(source)
 
   const filteredPoints = activeTagFilter
     ? points.filter(p => (p.customTags || []).includes(activeTagFilter))
@@ -1019,7 +1044,28 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
             <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">{getSourceLabel(source)}</h3>
+                  {editingSourceId === source.id ? (
+                    <input
+                      type="text"
+                      value={editingSourceName}
+                      onChange={e => setEditingSourceName(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingSourceId(null) }}
+                      autoFocus
+                      className="text-lg font-semibold text-gray-900 bg-white border border-blue-400 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 w-72"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 group">
+                      <h3 className="text-lg font-semibold text-gray-900">{getDisplayName(source)}</h3>
+                      <button
+                        onClick={() => startRename(source.id, getDisplayName(source))}
+                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-500 transition-all text-sm"
+                        title="重命名"
+                      >
+                        ✏️
+                      </button>
+                    </div>
+                  )}
                   <div className="text-sm text-gray-500">
                     {getSourceKindLabel(source.kind)}{source.size ? ` · ${formatFileSize(source.size)}` : ''} · {sourcePoints.length} 个考点
                   </div>
@@ -1251,6 +1297,7 @@ function App() {
   const [view, setView] = useState('scan')
   const [points, setPoints] = useState(loadData)
   const [userTags, setUserTags] = useState(loadUserTags)
+  const [sourceNames, setSourceNames] = useState(loadSourceNames)
 
   useEffect(() => {
     saveData(points)
@@ -1259,6 +1306,10 @@ function App() {
   useEffect(() => {
     saveUserTags(userTags)
   }, [userTags])
+
+  useEffect(() => {
+    saveSourceNames(sourceNames)
+  }, [sourceNames])
 
   const addPoints = (newPoints) => {
     setPoints(prev => {
@@ -1273,6 +1324,11 @@ function App() {
       })
       return updated
     })
+  }
+
+  const renameSource = (sourceId, name) => {
+    if (!name) return
+    setSourceNames(prev => ({ ...prev, [sourceId]: name }))
   }
 
   const createTag = (name) => {
@@ -1344,7 +1400,7 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} />}
-        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} />}
+        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
