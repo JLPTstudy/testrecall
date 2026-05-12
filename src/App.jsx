@@ -267,8 +267,11 @@ const callGeminiAPI = async (parts, temperature = 0.2) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts }],
-            generationConfig: { temperature, maxOutputTokens: 65536 },
-            thinkingConfig: { thinkingBudget: 0 },
+            generationConfig: {
+              temperature,
+              maxOutputTokens: 65536,
+              thinkingConfig: { thinkingBudget: 0 },
+            },
           }),
         }
       )
