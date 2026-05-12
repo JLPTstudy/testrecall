@@ -349,6 +349,76 @@ const sortBySourceOrder = (candidates, sourceText) => {
   return [...candidates].sort((a, b) => pos(a.term) - pos(b.term))
 }
 
+const rubyToHtml = (text) =>
+  text ? text.replace(/\[([^\]|]+)\|([^\]]+)\]/g, '<ruby>$1<rt>$2</rt></ruby>') : ''
+
+const generatePrintHTML = (folderName, sourceGroups, sourceNames) => {
+  const date = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date())
+  const total = sourceGroups.reduce((s, g) => s + g.points.length, 0)
+
+  const sourcesHTML = sourceGroups.map(({ source, points: srcPoints }) => {
+    const name = sourceNames[source.id] || getSourceLabel(source)
+    const sectionsHTML = STUDY_SECTIONS.map((section, idx) => {
+      const pts = srcPoints.filter(p => section.types.includes(p.type))
+      if (!pts.length) return ''
+      const rows = pts.map(p => `
+        <tr>
+          <td class="term-cell">
+            <span class="term">${p.term}</span>
+            <span class="badge">${TYPE_LABELS[p.type] || p.type}</span>
+            ${(p.occurrenceCount || 1) > 1 ? `<span class="occ">×${p.occurrenceCount}</span>` : ''}
+          </td>
+          <td>${p.reading || p.partOfSpeech || ''}</td>
+          <td>${p.meaningCN || ''}${p.connection ? `<div class="sub">接续：${p.connection}</div>` : ''}</td>
+          <td>${p.example ? `<span class="ex">${rubyToHtml(p.example)}</span>` : ''}${p.exampleCN ? `<div class="sub">${p.exampleCN}</div>` : ''}</td>
+          <td class="style-cell">${p.grammarStyle === 'daily' ? '<span class="daily">日常可用</span>' : p.grammarStyle === 'formal' ? '<span class="formal">书面用语</span>' : ''}</td>
+        </tr>`).join('')
+      return `<div class="section">
+        <h3>${idx + 1}、${section.title} <span class="cnt">${pts.length} 条</span></h3>
+        <table><thead><tr><th>考点</th><th>读音/词性</th><th>中文说明</th><th>例句</th><th>标签</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`
+    }).join('')
+    return `<div class="src">
+      <h2>${name}</h2>
+      <p class="src-meta">${getSourceKindLabel(source.kind)}${source.size ? ' · ' + formatFileSize(source.size) : ''} · ${srcPoints.length} 个考点</p>
+      ${sectionsHTML}</div>`
+  }).join('')
+
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
+<title>${folderName} — 考点汇总</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:"Hiragino Sans GB","Yu Gothic","Noto Sans CJK SC",sans-serif;font-size:12px;color:#1a1a1a;margin:0;padding:24px;line-height:1.6}
+h1{font-size:20px;margin:0 0 4px}
+.meta{color:#888;font-size:11px;margin-bottom:28px}
+.src{margin-bottom:36px}
+h2{font-size:14px;font-weight:700;border-bottom:2px solid #3b82f6;padding-bottom:4px;margin:0 0 2px}
+.src-meta{color:#9ca3af;font-size:10px;margin:0 0 12px}
+h3{font-size:11px;font-weight:600;color:#374151;margin:16px 0 6px}
+.cnt{font-weight:normal;color:#9ca3af}
+table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}
+th{background:#f3f4f6;text-align:left;padding:4px 6px;border:1px solid #e5e7eb;font-weight:600;color:#374151}
+td{padding:5px 6px;border:1px solid #e5e7eb;vertical-align:top}
+.term-cell{min-width:80px}
+.term{font-weight:700;font-size:13px;display:block}
+.badge{display:inline-block;font-size:9px;padding:1px 4px;border-radius:3px;background:#dbeafe;color:#1d4ed8;margin-top:2px}
+.occ{font-size:9px;color:#9ca3af;margin-left:3px}
+.sub{font-size:10px;color:#6b7280;margin-top:2px}
+.ex{color:#111}
+ruby rt{font-size:0.6em;color:#6b7280}
+.style-cell{white-space:nowrap;font-size:10px}
+.daily{color:#15803d;background:#dcfce7;padding:1px 5px;border-radius:3px}
+.formal{color:#4338ca;background:#e0e7ff;padding:1px 5px;border-radius:3px}
+@page{margin:1.5cm 2cm}
+@media print{body{padding:0}.src{page-break-inside:avoid}}
+</style></head><body>
+<h1>${folderName} — 考点汇总</h1>
+<p class="meta">${date} · 共 ${total} 个考点</p>
+${sourcesHTML}
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script>
+</body></html>`
+}
+
 const fillMissingExamples = async (points, onUpdate, onProgress) => {
   // Re-fill if missing example, missing CN translation, or missing furigana notation
   const toFill = points.filter(p => !p.example || !p.exampleCN || !p.example.includes('['))
@@ -1214,6 +1284,18 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
           className="px-3 py-1 rounded-full text-xs font-medium border border-dashed border-blue-400 text-blue-600 hover:bg-blue-50 transition-colors"
         >
           ＋ 手动添加考点
+        </button>
+        <button
+          onClick={() => {
+            const html = generatePrintHTML(activeFolder?.name || selectedFolder, sourceGroups, sourceNames)
+            const win = window.open('', '_blank')
+            win.document.write(html)
+            win.document.close()
+          }}
+          disabled={sourceGroups.length === 0}
+          className="px-3 py-1 rounded-full text-xs font-medium border border-dashed border-gray-400 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+        >
+          ↓ 导出 PDF
         </button>
         {(() => {
           const missing = sourceGroups.flatMap(g => g.points).filter(p => !p.example || !p.exampleCN || !p.example.includes('[')).length
