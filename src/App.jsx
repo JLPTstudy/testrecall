@@ -284,8 +284,8 @@ const callGeminiAPI = async (parts, temperature = 0.2) => {
         throw new Error(msg)
       }
       const data = await response.json()
-      const parts = data.candidates?.[0]?.content?.parts || []
-      const content = (parts.find(p => !p.thought) || parts[0])?.text
+      const resParts = data.candidates?.[0]?.content?.parts || []
+      const content = (resParts.find(p => !p.thought) || resParts[0])?.text
       if (!content) throw new Error('Gemini未返回有效内容')
       return content
     }
