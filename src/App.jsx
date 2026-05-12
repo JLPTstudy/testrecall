@@ -11,6 +11,7 @@ const GROQ_FALLBACK_MODEL = 'llama-3.1-8b-instant'
 // Gemini API — image vision (much better Japanese OCR, free tier)
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 const GEMINI_VISION_MODEL = 'gemini-2.5-flash'
+const GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash'
 
 const OCR_LANGS = 'jpn+chi_sim+eng'
 const PDF_OCR_SCALE = 2
@@ -249,58 +250,63 @@ const imageToBase64 = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file)
 })
 
-const callGeminiVision = async (imageDataUrl, prompt) => {
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+const isGeminiOverloaded = (status, msg) =>
+  status === 503 || status === 429 ||
+  /high demand|overloaded|try again/i.test(msg || '')
+
+// Shared Gemini caller — 3 retries per model, then falls back to GEMINI_FALLBACK_MODEL
+const callGeminiAPI = async (parts, temperature = 0.2) => {
+  const tryModel = async (model, retries = 3) => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { temperature, maxOutputTokens: 8192 },
+          }),
+        }
+      )
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        const msg = err.error?.message || `Gemini API错误 (${response.status})`
+        if (isGeminiOverloaded(response.status, msg) && attempt < retries) {
+          await sleep(3000 * (attempt + 1)) // 3s → 6s → 9s
+          continue
+        }
+        if (isGeminiOverloaded(response.status, msg) && model !== GEMINI_FALLBACK_MODEL) {
+          return tryModel(GEMINI_FALLBACK_MODEL)
+        }
+        throw new Error(msg)
+      }
+      const data = await response.json()
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!content) throw new Error('Gemini未返回有效内容')
+      return content
+    }
+  }
+  return tryModel(GEMINI_VISION_MODEL)
+}
+
+const callGeminiVision = (imageDataUrl, prompt, temperature = 0.2) => {
   const [header, base64Data] = imageDataUrl.split(',')
   const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg'
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inline_data: { mime_type: mimeType, data: base64Data } },
-          { text: prompt },
-        ]}],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-      }),
-    }
+  return callGeminiAPI(
+    [{ inline_data: { mime_type: mimeType, data: base64Data } }, { text: prompt }],
+    temperature,
   )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Gemini API错误 (${response.status})`)
-  }
-  const data = await response.json()
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!content) throw new Error('Gemini未返回有效内容')
-  return content
 }
 
 // Gemini text-only fallback (same model as vision, no image parts)
-const callGeminiText = async (messages, temperature = 0.2) => {
+const callGeminiText = (messages, temperature = 0.2) => {
   const prompt = messages.map(m =>
     typeof m.content === 'string' ? m.content : (m.content || []).map(c => c.text || '').join('\n')
   ).join('\n\n')
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature, maxOutputTokens: 8192 },
-      }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Gemini API错误 (${response.status})`)
-  }
-  const data = await response.json()
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!content) throw new Error('Gemini未返回有效内容')
-  return content
+  return callGeminiAPI([{ text: prompt }], temperature)
 }
 
 const callGroq = async (messages, model, temperature = 0.2) => {
