@@ -112,6 +112,7 @@ const toPoint = (item, idx, source = defaultSource) => {
     level: item.level || null,
     usage: item.usage || null,
     example: item.example || null,
+    grammarStyle: item.grammar_style || item.grammarStyle || null, // 'daily' | 'formal' | null
     related: normalizeRelated(item.related),
     sourceExam: item.source_exam || item.sourceExam || null,
     source,
@@ -160,7 +161,7 @@ const TEXT_SYSTEM_PROMPT = `你是JLPT日语考点提取专家，只返回JSON�
 const ALL_LEVELS = ['N1', 'N2', 'N3', 'N4', 'N5']
 
 const JSON_EXAMPLE = `[{"term":"もくろむ","type":"vocabulary","reading":"もくろむ","meaning_cn":"图谋、策划"},
- {"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...","connection":"普通形+にもかかわらず"},
+ {"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...","connection":"普通形+にもかかわらず","grammar_style":"formal"},
  {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束、可以推心置腹"}]`
 
 const buildExtractionRules = (levels) => {
@@ -168,7 +169,7 @@ const buildExtractionRules = (levels) => {
   const excludeN4N5Grammar = !levels.includes('N4') && !levels.includes('N5')
   return `
 类型：
-- grammar = ${levelStr}级别语法句型，通常是复合助词或接续形式，例：〜にもかかわらず・〜を皮切りに・〜に際して・〜ずにはおかない・〜かねない・〜をもって・〜に至る${excludeN4N5Grammar ? '。注意：〜ておく・〜てみる・〜ばかり・〜はず・〜わけ・〜なくても 等N4-N5基础语法【不要提取】' : ''}
+- grammar = ${levelStr}级别语法句型，通常是复合助词或接续形式，例：〜にもかかわらず・〜を皮切りに・〜に際して・〜ずにはおかない・〜かねない・〜をもって・〜に至る${excludeN4N5Grammar ? '。注意：〜ておく・〜てみる・〜ばかり・〜はず・〜わけ・〜なくても 等N4-N5基础语法【不要提取】' : ''}。grammar类型必须额外返回grammar_style字段：'daily'（日常口语/会话中常用）或'formal'（书面语/正式文章中使用）
 - collocation = 两词以上的惯用表达，整体含义无法从各词字面推导（例：気が置けない・手が込む・目を見張る）。普通的「名词+助词」短语不是collocation
 - vocabulary = ${levelStr}范围词汇（名词/动词/形容词/副词），动词写辞书形
 
@@ -1084,7 +1085,7 @@ function SourceCategoryEditor({ sourceId, currentCategory, allCategories, onAssi
 }
 
 // Points List View Component
-function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample }) {
+function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle }) {
   const [selectedFolder, setSelectedFolder] = useState(null) // null = folder grid; '__uncat__' or category name
   const [openEditorId, setOpenEditorId] = useState(null)     // point tag editor
   const [openCatEditorId, setOpenCatEditorId] = useState(null) // source category editor
@@ -1339,7 +1340,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                               <th className="py-2 px-3 font-medium hidden md:table-cell">读音/级别</th>
                               <th className="py-2 px-3 font-medium">中文说明</th>
                               <th className="py-2 pl-3 font-medium hidden lg:table-cell">例句/提示</th>
-                              <th className="py-2 pl-3 font-medium">分类</th>
+                              <th className="py-2 pl-3 font-medium">标签</th>
                               <th className="py-2 pl-2 font-medium w-6"></th>
                             </tr>
                           </thead>
@@ -1382,33 +1383,22 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                     )}
                                   </td>
                                   <td className="py-3 pl-3">
-                                    <div className="relative flex flex-wrap gap-1 items-center">
-                                      {pointTags.map(tag => {
-                                        const style = getTagStyle(tag, userTags)
-                                        return (
-                                          <span key={tag} className={`px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}>
-                                            {tag}
-                                          </span>
-                                        )
-                                      })}
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); setOpenEditorId(openEditorId === point.id ? null : point.id) }}
-                                        className="px-1.5 py-0.5 rounded border border-dashed border-gray-300 text-gray-400 text-xs hover:border-blue-400 hover:text-blue-500 transition-colors"
-                                        title="添加分类"
-                                      >
-                                        +
-                                      </button>
-                                      {openEditorId === point.id && (
-                                        <TagEditor
-                                          point={point}
-                                          userTags={userTags}
-                                          onToggleTag={handleToggleTag}
-                                          onCreateTag={onCreateTag}
-                                          onClose={() => setOpenEditorId(null)}
-                                          editorRef={tagEditorRef}
-                                        />
-                                      )}
-                                    </div>
+                                    {point.type === 'grammar' && (
+                                      <div className="flex flex-col gap-1">
+                                        <button
+                                          onClick={() => onUpdateGrammarStyle(point.id, point.grammarStyle === 'daily' ? null : 'daily')}
+                                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${point.grammarStyle === 'daily' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 hover:bg-green-50 hover:text-green-600'}`}
+                                        >
+                                          日常可用
+                                        </button>
+                                        <button
+                                          onClick={() => onUpdateGrammarStyle(point.id, point.grammarStyle === 'formal' ? null : 'formal')}
+                                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${point.grammarStyle === 'formal' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                                        >
+                                          书面用语
+                                        </button>
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="py-3 pl-2">
                                     <button
@@ -1580,6 +1570,10 @@ function App() {
     setPoints(prev => prev.filter(p => p.id !== pointId))
   }
 
+  const updateGrammarStyle = (pointId, style) => {
+    setPoints(prev => prev.map(p => p.id === pointId ? { ...p, grammarStyle: style } : p))
+  }
+
   const updatePointExample = (pointId, example, exampleCN) => {
     setPoints(prev => prev.map(p =>
       p.id === pointId ? { ...p, example, ...(exampleCN ? { exampleCN } : {}) } : p
@@ -1664,7 +1658,7 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} />}
-        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} />}
+        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
