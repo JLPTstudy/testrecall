@@ -1466,8 +1466,8 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
               {STUDY_SECTIONS.map((section, sectionIndex) => {
                 const sectionPoints = sourcePoints.filter(point => section.types.includes(point.type))
                 const collapseKey = `${source.id}-${section.id}`
-                const collapsed = !!collapsedSections[collapseKey]
-                const toggleCollapse = () => setCollapsedSections(prev => ({ ...prev, [collapseKey]: !prev[collapseKey] }))
+                const collapsed = collapsedSections[collapseKey] !== false
+                const toggleCollapse = () => setCollapsedSections(prev => ({ ...prev, [collapseKey]: prev[collapseKey] === false }))
                 return (
                   <div key={section.id} className="px-5 py-4">
                     <button
