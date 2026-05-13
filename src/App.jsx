@@ -1197,7 +1197,7 @@ function SourceCategoryEditor({ sourceId, currentCategory, allCategories, onAssi
 }
 
 // Points List View Component
-function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources }) {
+function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources, onDeleteCategory }) {
   const [selectedFolder, setSelectedFolder] = useState(null) // null = folder grid; '__uncat__' or category name
   const [openEditorId, setOpenEditorId] = useState(null)     // point tag editor
   const [openCatEditorId, setOpenCatEditorId] = useState(null) // source category editor
@@ -1290,15 +1290,30 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
         <h2 className="text-2xl font-bold text-gray-800 mb-6">📚 考点列表</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {folders.map(folder => (
-            <button
-              key={folder.id}
-              onClick={() => setSelectedFolder(folder.id)}
-              className="bg-white border border-gray-200 rounded-xl p-5 text-left hover:border-blue-300 hover:shadow-md transition-all"
-            >
-              <div className="text-3xl mb-3">{folder.id === '__uncat__' ? '📂' : '📁'}</div>
-              <div className="font-semibold text-gray-800 mb-1 truncate">{folder.name}</div>
-              <div className="text-xs text-gray-400">{folder.groups.length} 个来源 · {folder.pointCount} 个考点</div>
-            </button>
+            <div key={folder.id} className="relative group">
+              <button
+                onClick={() => setSelectedFolder(folder.id)}
+                className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left hover:border-blue-300 hover:shadow-md transition-all"
+              >
+                <div className="text-3xl mb-3">{folder.id === '__uncat__' ? '📂' : '📁'}</div>
+                <div className="font-semibold text-gray-800 mb-1 truncate">{folder.name}</div>
+                <div className="text-xs text-gray-400">{folder.groups.length} 个来源 · {folder.pointCount} 个考点</div>
+              </button>
+              {folder.id !== '__uncat__' && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation()
+                    if (confirm(`删除分类「${folder.name}」？\n该分类下的来源将移回「未分类」，考点不会删除。`)) {
+                      onDeleteCategory(folder.id)
+                    }
+                  }}
+                  className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-gray-300 hover:bg-red-50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all text-sm"
+                  title="删除分类"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -1742,6 +1757,14 @@ function App() {
     })
   }
 
+  const deleteCategory = (categoryName) => {
+    setSourceCategories(prev => {
+      const next = { ...prev }
+      Object.keys(next).forEach(sid => { if (next[sid] === categoryName) delete next[sid] })
+      return next
+    })
+  }
+
   const mergeSources = (sourceIds, mergedName) => {
     if (sourceIds.length < 2) return
     const mergedSourceId = `merged-${Date.now()}`
@@ -1847,7 +1870,7 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} />}
-        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} />}
+        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
