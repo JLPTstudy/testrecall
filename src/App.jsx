@@ -462,9 +462,10 @@ const fillMissingExamples = async (points, onUpdate, onProgress) => {
 
   const BATCH = 8
   let filled = 0
+  let lastError = null
   for (let i = 0; i < toFill.length; i += BATCH) {
     const batch = toFill.slice(i, i + BATCH)
-    const input = batch.map(p => ({ id: p.id, term: p.term, type: p.type, connection: p.connection || undefined }))
+    const input = batch.map(p => ({ id: String(p.id), term: p.term, type: p.type, connection: p.connection || undefined }))
     try {
       const content = await callGroq(
         [
@@ -486,9 +487,12 @@ const fillMissingExamples = async (points, onUpdate, onProgress) => {
         0,
       )
       const results = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] || '[]')
-      results.forEach(r => { if (r.id && r.example) { onUpdate(r.id, r.example, r.example_cn || null); filled++ } })
-    } catch {}
-    if (onProgress) onProgress(Math.min(i + BATCH, toFill.length), toFill.length)
+      results.forEach(r => { if (r.id && r.example) { onUpdate(String(r.id), r.example, r.example_cn || null); filled++ } })
+      lastError = null
+    } catch (e) {
+      lastError = e.message || '未知错误'
+    }
+    if (onProgress) onProgress(Math.min(i + BATCH, toFill.length), toFill.length, lastError)
   }
   return filled
 }
@@ -1199,7 +1203,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
   const [openCatEditorId, setOpenCatEditorId] = useState(null) // source category editor
   const [showAddForm, setShowAddForm] = useState(false)
   const [filling, setFilling] = useState(false)
-  const [fillProgress, setFillProgress] = useState(null) // { done, total }
+  const [fillProgress, setFillProgress] = useState(null) // { done, total, error? }
   const [collapsedSections, setCollapsedSections] = useState({}) // key: `${sourceId}-${sectionId}`
   const [editingSourceId, setEditingSourceId] = useState(null)
   const [editingSourceName, setEditingSourceName] = useState('')
@@ -1360,7 +1364,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                 await fillMissingExamples(
                   sourceGroups.flatMap(g => g.points),
                   onUpdatePointExample,
-                  (done, total) => setFillProgress({ done, total }),
+                  (done, total, error) => setFillProgress({ done, total, error }),
                 )
                 setFilling(false)
                 setFillProgress(null)
@@ -1368,7 +1372,9 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
               className="px-3 py-1 rounded-full text-xs font-medium border border-dashed border-purple-400 text-purple-600 hover:bg-purple-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {filling
-                ? `✨ 补全中… ${fillProgress ? `${fillProgress.done}/${fillProgress.total}` : ''}`
+                ? (fillProgress?.error
+                    ? `⚠️ 错误: ${fillProgress.error.slice(0, 40)}… (${fillProgress.done}/${fillProgress.total})`
+                    : `✨ 补全中… ${fillProgress ? `${fillProgress.done}/${fillProgress.total}` : ''}`)
                 : missing > 0 ? `✨ 补全例句（${missing} 个缺失）` : '✨ 例句已全'}
             </button>
           )
@@ -1723,7 +1729,7 @@ function App() {
 
   const updatePointExample = (pointId, example, exampleCN) => {
     setPoints(prev => prev.map(p =>
-      p.id === pointId ? { ...p, example, ...(exampleCN ? { exampleCN } : {}) } : p
+      String(p.id) === String(pointId) ? { ...p, example, ...(exampleCN ? { exampleCN } : {}) } : p
     ))
   }
 
