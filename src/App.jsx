@@ -1600,6 +1600,197 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
 }
 
 // Statistics View Component
+function FlashcardView({ points, sourceNames, sourceCategories, onReview }) {
+  const [deckSource, setDeckSource] = useState('__all__')
+  const [queue, setQueue] = useState(null)   // null = not started
+  const [idx, setIdx] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [sessionStats, setSessionStats] = useState({ known: 0, again: 0 })
+
+  // build source options
+  const allSources = [...new Map(points.map(p => [(p.source || {}).id, p.source])).values()].filter(Boolean)
+
+  const buildQueue = (src) => {
+    const pool = src === '__all__' ? points : points.filter(p => (p.source || {}).id === src)
+    // prioritise unseen / low-score, shuffle within tiers
+    const sorted = [...pool].sort((a, b) => {
+      const scoreA = a.memoryScore || 0, scoreB = b.memoryScore || 0
+      return scoreA - scoreB
+    })
+    return sorted
+  }
+
+  const startDeck = () => {
+    const q = buildQueue(deckSource)
+    if (q.length === 0) return
+    setQueue(q)
+    setIdx(0)
+    setFlipped(false)
+    setSessionStats({ known: 0, again: 0 })
+  }
+
+  const current = queue?.[idx]
+
+  const handleKnown = () => {
+    onReview(current.id, true)
+    setSessionStats(s => ({ ...s, known: s.known + 1 }))
+    advance()
+  }
+
+  const handleAgain = () => {
+    onReview(current.id, false)
+    setSessionStats(s => ({ ...s, again: s.again + 1 }))
+    advance()
+  }
+
+  const advance = () => {
+    setFlipped(false)
+    if (idx + 1 >= queue.length) {
+      setQueue(null) // session done
+    } else {
+      setIdx(i => i + 1)
+    }
+  }
+
+  const getSourceLabel = (src) => sourceNames[src?.id] || src?.title || '未知来源'
+
+  // ── Done screen ───────────────────────────────────────────────────────────
+  if (queue === null && sessionStats.known + sessionStats.again > 0) {
+    const total = sessionStats.known + sessionStats.again
+    const pct = Math.round((sessionStats.known / total) * 100)
+    return (
+      <div className="max-w-md mx-auto text-center py-16">
+        <div className="text-6xl mb-4">🎉</div>
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">本轮完成！</h2>
+        <p className="text-gray-500 mb-6">共 {total} 张，记住 {sessionStats.known} 张（{pct}%）</p>
+        <div className="flex gap-3 justify-center">
+          <button onClick={startDeck} className="px-6 py-2 bg-blue-600 text-white rounded-full text-sm font-medium hover:bg-blue-700">再来一轮</button>
+          <button onClick={() => { setQueue(null); setSessionStats({ known: 0, again: 0 }) }} className="px-6 py-2 border border-gray-300 text-gray-600 rounded-full text-sm hover:bg-gray-50">返回选择</button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Setup screen ──────────────────────────────────────────────────────────
+  if (queue === null) {
+    const pool = deckSource === '__all__' ? points : points.filter(p => (p.source || {}).id === deckSource)
+    return (
+      <div className="max-w-md mx-auto py-12">
+        <h2 className="text-2xl font-bold text-gray-800 mb-8 text-center">🃏 记忆卡片</h2>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+          <label className="block text-sm font-medium text-gray-700 mb-2">选择来源</label>
+          <select
+            value={deckSource}
+            onChange={e => setDeckSource(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="__all__">全部考点（{points.length} 个）</option>
+            {allSources.map(src => (
+              <option key={src.id} value={src.id}>
+                {getSourceLabel(src)}（{points.filter(p => (p.source || {}).id === src.id).length} 个）
+              </option>
+            ))}
+          </select>
+          <div className="flex justify-between text-xs text-gray-500 mb-6">
+            <span>本组：{pool.length} 张</span>
+            <span>已复习：{pool.filter(p => p.lastReviewedAt).length} 张</span>
+            <span>记住：{pool.filter(p => (p.memoryScore || 0) >= 3).length} 张</span>
+          </div>
+          <button
+            onClick={startDeck}
+            disabled={pool.length === 0}
+            className="w-full py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            开始复习
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Card screen ───────────────────────────────────────────────────────────
+  const progress = (idx / queue.length) * 100
+  const colors = TYPE_COLORS[current.type] || TYPE_COLORS.vocabulary
+
+  return (
+    <div className="max-w-lg mx-auto py-8">
+      {/* Progress */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+        </div>
+        <span className="text-xs text-gray-400 shrink-0">{idx + 1} / {queue.length}</span>
+        <span className="text-xs text-green-600 shrink-0">✓ {sessionStats.known}</span>
+        <span className="text-xs text-red-400 shrink-0">↺ {sessionStats.again}</span>
+      </div>
+
+      {/* Card */}
+      <div
+        onClick={() => setFlipped(f => !f)}
+        className="bg-white border border-gray-200 rounded-2xl shadow-sm cursor-pointer select-none min-h-64 flex flex-col"
+      >
+        {/* Front */}
+        <div className="flex-1 flex flex-col items-center justify-center px-8 py-10 text-center">
+          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mb-4 ${colors.bg} ${colors.text}`}>
+            {TYPE_LABELS[current.type] || current.type}
+          </span>
+          <div className="text-4xl font-bold text-gray-900 mb-2">{current.term}</div>
+          {current.reading && current.reading !== current.term && (
+            <div className="text-lg text-gray-400">{current.reading}</div>
+          )}
+          {current.connection && (
+            <div className="text-sm text-gray-500 mt-2 bg-gray-50 px-3 py-1 rounded-lg">接续：{current.connection}</div>
+          )}
+        </div>
+
+        {/* Divider + Back */}
+        {flipped ? (
+          <div className="border-t border-gray-100 px-8 py-6">
+            {current.meaningCN && (
+              <div className="text-base font-medium text-gray-800 mb-3">{current.meaningCN}</div>
+            )}
+            {current.example && (
+              <div className="text-sm text-gray-600 leading-relaxed mb-1">
+                <RubyText text={current.example} />
+              </div>
+            )}
+            {current.exampleCN && (
+              <div className="text-xs text-gray-400">{current.exampleCN}</div>
+            )}
+            {current.grammarStyle && (
+              <span className={`inline-block mt-2 px-2 py-0.5 rounded text-xs ${current.grammarStyle === 'daily' ? 'bg-green-100 text-green-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                {current.grammarStyle === 'daily' ? '日常可用' : '书面用语'}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="border-t border-gray-100 px-8 py-4 text-center text-sm text-gray-400">
+            点击翻转查看释义
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons — only shown after flip */}
+      {flipped && (
+        <div className="flex gap-3 mt-5">
+          <button
+            onClick={handleAgain}
+            className="flex-1 py-3 border-2 border-red-200 text-red-500 rounded-xl font-medium hover:bg-red-50 transition-colors"
+          >
+            ↺ 再复习
+          </button>
+          <button
+            onClick={handleKnown}
+            className="flex-1 py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
+          >
+            ✓ 记住了
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StatisticsView({ points }) {
   const typeCount = points.reduce((acc, p) => {
     acc[p.type] = (acc[p.type] || 0) + 1
@@ -1757,6 +1948,17 @@ function App() {
     })
   }
 
+  const reviewPoint = (pointId, known) => {
+    setPoints(prev => prev.map(p => {
+      if (String(p.id) !== String(pointId)) return p
+      const score = Math.max(0, (p.memoryScore || 0) + (known ? 1 : -1))
+      const now = new Date()
+      const days = known ? Math.max(1, score) : 0.25 // forgot → review in 6h
+      const next = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+      return { ...p, memoryScore: score, reviewCount: (p.reviewCount || 0) + 1, lastReviewedAt: now.toISOString(), nextReviewAt: next.toISOString() }
+    }))
+  }
+
   const deleteCategory = (categoryName) => {
     setSourceCategories(prev => {
       const next = { ...prev }
@@ -1857,6 +2059,7 @@ function App() {
             {[
               { id: 'scan', icon: '📷', label: '扫描' },
               { id: 'points', icon: '📚', label: '考点' },
+              { id: 'cards', icon: '🃏', label: '卡片' },
               { id: 'stats', icon: '📊', label: '统计' },
             ].map((item) => (
               <button
@@ -1880,6 +2083,7 @@ function App() {
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} />}
         {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} />}
+        {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
