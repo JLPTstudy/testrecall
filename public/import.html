@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>导入考点 — TestRecall</title>
+<style>
+body{font-family:-apple-system,sans-serif;padding:48px 32px;max-width:520px;margin:0 auto;background:#f9fafb;color:#111}
+h2{font-size:22px;margin-bottom:8px}p{color:#6b7280;margin-bottom:24px}
+.btn{display:block;width:100%;padding:14px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover{background:#2563eb}.btn:disabled{background:#93c5fd;cursor:not-allowed}
+.status{margin-top:20px;padding:16px;border-radius:8px;font-size:14px;display:none}
+.ok{background:#d1fae5;color:#065f46;display:block}.err{background:#fee2e2;color:#991b1b;display:block}
+</style></head>
+<body>
+<h2>📚 导入 2021.12 考点</h2>
+<p>将 43 页真题的 1537 个考点导入到 TestRecall。</p>
+<button class="btn" id="btn" onclick="doImport()">开始导入</button>
+<div class="status" id="status"></div>
+<script>
+async function doImport(){
+  const btn=document.getElementById('btn');
+  const st=document.getElementById('status');
+  btn.disabled=true; btn.textContent='加载数据中…';
+  try{
+    const resp=await fetch('./import_2021_12.json');
+    if(!resp.ok) throw new Error('数据文件加载失败 '+resp.status);
+    const pts=await resp.json();
+    btn.textContent='写入 localStorage…';
+    const ex=JSON.parse(localStorage.getItem('testrecall_points')||'[]');
+    const m=new Map(ex.map(p=>[p.type+'::'+p.term.toLowerCase(),p]));
+    let added=0;
+    pts.forEach(p=>{
+      const k=p.type+'::'+p.term.toLowerCase();
+      if(!m.has(k)){m.set(k,p);added++;}
+      else m.get(k).occurrenceCount=(m.get(k).occurrenceCount||1)+1;
+    });
+    localStorage.setItem('testrecall_points',JSON.stringify([...m.values()]));
+    const n=JSON.parse(localStorage.getItem('testrecall_source_names')||'{}');
+    n['2021.12-n1-pdf']='2021.12';
+    localStorage.setItem('testrecall_source_names',JSON.stringify(n));
+    st.className='status ok';
+    st.textContent='✅ 导入成功！新增 '+added+' 个考点，3 秒后跳转…';
+    setTimeout(()=>location.href='./',3000);
+  }catch(e){
+    st.className='status err';
+    st.textContent='❌ 失败：'+e.message;
+    btn.disabled=false; btn.textContent='重试';
+  }
+}
+</script>
+</body></html>
