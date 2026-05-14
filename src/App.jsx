@@ -1940,6 +1940,7 @@ function App() {
   const [user, setUser] = useState(null)
   const [syncStatus, setSyncStatus] = useState('idle') // 'idle'|'syncing'|'synced'|'error'
   const [showLoginModal, setShowLoginModal] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('tr_welcomed'))
   const [showAnnouncement, setShowAnnouncement] = useState(false)
   const [showContact, setShowContact] = useState(false)
   const [showAdminDash, setShowAdminDash] = useState(false)
@@ -2348,6 +2349,60 @@ function App() {
             <div className="flex gap-3">
               <button onClick={() => setShowSettings(false)} className="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2.5 text-sm hover:bg-gray-50">取消</button>
               <button onClick={saveSettings} className="flex-1 bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome / Onboarding Modal */}
+      {showWelcome && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 px-6 pt-8 pb-6 text-white text-center">
+              <div className="text-5xl mb-3">📝</div>
+              <h2 className="text-xl font-bold mb-1">欢迎使用 TestRecall</h2>
+              <p className="text-blue-100 text-sm">JLPT 日语考点记忆助手</p>
+            </div>
+            {/* Body */}
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600 mb-4">使用 AI 扫描功能前，需要先配置免费的 API Key（30 秒搞定）：</p>
+              <div className="space-y-3 mb-5">
+                <div className="flex gap-3 items-start bg-orange-50 rounded-xl p-3">
+                  <span className="text-xl flex-shrink-0">🤖</span>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Groq API Key</p>
+                    <p className="text-xs text-gray-500 mt-0.5">用于文字识别和考点提取，免费无限量</p>
+                    <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">→ console.groq.com 免费注册获取</a>
+                  </div>
+                </div>
+                <div className="flex gap-3 items-start bg-purple-50 rounded-xl p-3">
+                  <span className="text-xl flex-shrink-0">👁️</span>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Gemini API Key</p>
+                    <p className="text-xs text-gray-500 mt-0.5">用于识别图片和 PDF 内容，免费额度充足</p>
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">→ aistudio.google.com 免费获取</a>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  localStorage.setItem('tr_welcomed', '1')
+                  setShowWelcome(false)
+                  setSettingsGroqKey(localStorage.getItem('user_groq_key') || '')
+                  setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || '')
+                  setShowSettings(true)
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-semibold transition-colors mb-2"
+              >
+                ⚙️ 立即去设置 API Key
+              </button>
+              <button
+                onClick={() => { localStorage.setItem('tr_welcomed', '1'); setShowWelcome(false) }}
+                className="w-full text-xs text-gray-400 hover:text-gray-600 py-2"
+              >
+                稍后再说，先看看功能
+              </button>
             </div>
           </div>
         </div>
