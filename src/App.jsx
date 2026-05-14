@@ -1268,8 +1268,7 @@ function SourceCategoryEditor({ sourceId, currentCategory, allCategories, onAssi
 }
 
 // Points List View Component
-function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources, onDeleteCategory, favorites = new Set(), onToggleFavorite }) {
-  const [selectedFolder, setSelectedFolder] = useState(null) // null = folder grid; '__uncat__' or category name
+function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources, onDeleteCategory, favorites = new Set(), onToggleFavorite, selectedFolder, setSelectedFolder }) {
   const [openEditorId, setOpenEditorId] = useState(null)     // point tag editor
   const [openCatEditorId, setOpenCatEditorId] = useState(null) // source category editor
   const [showAddForm, setShowAddForm] = useState(false)
@@ -2073,6 +2072,7 @@ function App() {
   const [points, setPoints] = useState(loadData)
   const [userTags, setUserTags] = useState(loadUserTags)
   const [favorites, setFavorites] = useState(loadFavorites)
+  const [pointsFolder, setPointsFolder] = useState(null)
   const [sourceNames, setSourceNames] = useState(loadSourceNames)
   const [sourceCategories, setSourceCategories] = useState(loadSourceCategories)
   const [user, setUser] = useState(null)
@@ -2439,7 +2439,7 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} isAdmin={user?.email === ADMIN_EMAIL} onOpenSettings={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }} />}
-        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} favorites={favorites} onToggleFavorite={toggleFavorite} />}
+        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} favorites={favorites} onToggleFavorite={toggleFavorite} selectedFolder={pointsFolder} setSelectedFolder={setPointsFolder} />}
         {view === 'favorites' && <FavoritesView points={points} favorites={favorites} onToggleFavorite={toggleFavorite} onDeletePoint={deletePoint} />}
         {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} />}
         {view === 'stats' && <StatisticsView points={points} />}
