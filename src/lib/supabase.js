@@ -18,9 +18,21 @@ export async function syncPointsToCloud(userId, points) {
 
 export async function loadPointsFromCloud(userId) {
   if (!supabase || !userId) return null
-  const { data, error } = await supabase.from('points').select('data').eq('user_id', userId)
-  if (error) throw error
-  return data.map(row => row.data)
+  const allRows = []
+  const PAGE = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('points')
+      .select('data')
+      .eq('user_id', userId)
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    allRows.push(...data)
+    if (data.length < PAGE) break
+    from += PAGE
+  }
+  return allRows.map(row => row.data)
 }
 
 export async function syncSettingsToCloud(userId, settings) {
