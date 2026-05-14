@@ -29,7 +29,7 @@ const CHANGELOG = [
     version: 'v1.0',
     date: '2026-05-13',
     items: [
-      '上传 PDF / 图片，AI 自动提取 JLPT N1/N2 考点',
+      '上传 PDF / 图片，AI 自动提取 JLPT 考点',
       '手动添加词汇 / 语法 / 搭配',
       '闪卡复习 + 记忆评分系统',
       '多维度统计图表',
