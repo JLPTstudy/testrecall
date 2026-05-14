@@ -136,6 +136,10 @@ const formatFileSize = (size = 0) => {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+// Reading must be purely phonetic (hiragana / katakana / long-vowel / middle-dot / romaji).
+// Reject anything that still contains kanji or other non-phonetic chars — those are AI errors.
+const isValidReading = (r) => !!r && /^[ぁ-んァ-ヶーa-zA-Z\s・〜～]+$/.test(r.trim())
+
 const toPoint = (item, idx, source = defaultSource) => {
   const now = Date.now()
   const term = normalizeTerm(item.term || '')
@@ -145,7 +149,7 @@ const toPoint = (item, idx, source = defaultSource) => {
     id: `${now}-${idx}`,
     type,
     term,
-    reading: item.reading || null,
+    reading: isValidReading(item.reading) ? item.reading : null,
     meaningCN: item.meaning_cn || item.meaningCN || null,
     meaningEN: item.meaning_en || item.meaningEN || null,
     partOfSpeech: item.part_of_speech || item.partOfSpeech || null,
@@ -170,7 +174,7 @@ const toPoint = (item, idx, source = defaultSource) => {
 
 const mergePoint = (existing, incoming) => ({
   ...existing,
-  reading: existing.reading || incoming.reading,
+  reading: [existing.reading, incoming.reading].find(isValidReading) || null,
   meaningCN: existing.meaningCN || incoming.meaningCN,
   meaningEN: existing.meaningEN || incoming.meaningEN,
   partOfSpeech: existing.partOfSpeech || incoming.partOfSpeech,
@@ -203,9 +207,10 @@ const TEXT_SYSTEM_PROMPT = `你是JLPT日语考点提取专家，只返回JSON�
 
 const ALL_LEVELS = ['N1', 'N2', 'N3', 'N4', 'N5']
 
-const JSON_EXAMPLE = `[{"term":"もくろむ","type":"vocabulary","reading":"もくろむ","meaning_cn":"图谋、策划"},
+const JSON_EXAMPLE = `[{"term":"目論む","type":"vocabulary","reading":"もくろむ","meaning_cn":"图谋、策划"},
  {"term":"〜にもかかわらず","type":"grammar","meaning_cn":"尽管...","connection":"普通形+にもかかわらず","grammar_style":"formal"},
- {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束、可以推心置腹"}]`
+ {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束、可以推心置腹"}]
+注意：reading字段只能填纯平假名（如：もくろむ），绝对不能含有汉字或片假名以外的字符。grammar/collocation不需要reading字段。`
 
 const buildExtractionRules = (levels) => {
   const levelStr = levels.join('/')
@@ -1680,7 +1685,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                     </div>
                                   </td>
                                   <td className="py-3 px-3 text-gray-600 hidden md:table-cell">
-                                    {point.reading || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '') || ''}
+                                    {(isValidReading(point.reading) ? point.reading : null) || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '') || ''}
                                   </td>
                                   <td className="py-3 px-3 text-gray-700">
                                     {point.meaningCN || point.usage || point.nuance || '-'}
@@ -1955,7 +1960,7 @@ function FlashcardView({ points, sourceNames, sourceCategories, onReview, deckSo
             {TYPE_LABELS[current.type] || current.type}
           </span>
           <div className="text-4xl font-bold text-gray-900 mb-2">{current.term}</div>
-          {current.reading && current.reading !== current.term && (
+          {isValidReading(current.reading) && current.reading !== current.term && (
             <div className="text-lg text-gray-400">{current.reading}</div>
           )}
           {current.connection && (
@@ -2074,7 +2079,7 @@ function StatisticsView({ points }) {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-gray-900">{p.term}</span>
-                              {p.reading && <span className="text-sm text-gray-500">({p.reading})</span>}
+                              {isValidReading(p.reading) && <span className="text-sm text-gray-500">({p.reading})</span>}
                             </div>
                             {p.meaningCN && <div className="text-sm text-gray-600 mt-0.5">{p.meaningCN}</div>}
                             {p.type === 'grammar' && p.connection && (
@@ -2167,7 +2172,7 @@ function FavoritesView({ points, favorites, onToggleFavorite, onDeletePoint }) {
             <table className="w-full text-left text-sm">
               <tbody className="divide-y divide-gray-100">
                 {pts.map(point => {
-                  const displayReading = point.reading || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '')
+                  const displayReading = (isValidReading(point.reading) ? point.reading : null) || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '')
                   return (
                     <tr key={point.id} className="align-top">
                       <td className="py-3 px-4">
