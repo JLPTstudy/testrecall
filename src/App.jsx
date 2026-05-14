@@ -210,8 +210,9 @@ const buildExtractionRules = (levels) => {
 1. 严格只提取${levelStr}程度词汇，级别不够的词哪怕出现在题目中也不提取
 2. 题干中被直接考查（下划线/括号标注）的目标词必须提取
 3. 4个选项全部检查；选项是完整句子时，拆出${levelStr}级别关键词单独提取
-4. 不提取「文法」「語彙」「読解」「聴解」等章节标题
-5. 宁可少抓，不可抓低级别词凑数`
+4. 【绝对禁止】不提取试卷封面/说明用语，哪怕出现多次也不提取：問題用紙・解答用紙・言語知識・文字語彙・受験番号・解答・記入・注意事項・受験・ページ・番号・鉛筆・用紙・試験
+5. 不提取「文法」「語彙」「読解」「聴解」等章节标题
+6. 宁可少抓，不可抓低级别词凑数`
 }
 
 const buildTextPrompt = (levels) =>
@@ -1978,6 +1979,7 @@ const EXAM_META_TERMS = new Set([
   '鉛筆', '試験', '受験', 'ページ', '点', '点数', 'メモ', '用紙',
   '注意', '注意事項', '以下', '次', '次の', '各', '各問', '正しい',
   '適切', '最適', '空欄', '下線', '傍線',
+  '言語知識', '文字語彙', '読解', '聴解', '文法',
 ])
 
 function StatisticsView({ points }) {
@@ -2247,6 +2249,17 @@ function App() {
   useEffect(() => { saveUserTags(userTags) }, [userTags])
   useEffect(() => { saveFavorites(favorites) }, [favorites])
   useEffect(() => { trackEvent(null, 'page_view') }, [])
+
+  // One-time cleanup: remove exam meta terms from existing data
+  useEffect(() => {
+    if (localStorage.getItem('tr_meta_cleaned')) return
+    setPoints(prev => {
+      const cleaned = prev.filter(p => !EXAM_META_TERMS.has(p.term))
+      if (cleaned.length === prev.length) { localStorage.setItem('tr_meta_cleaned', '1'); return prev }
+      localStorage.setItem('tr_meta_cleaned', '1')
+      return cleaned
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-load built-in data for new users (merge, never overwrite)
   useEffect(() => {
