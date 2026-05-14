@@ -1330,7 +1330,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
   const getDisplayName = (source) => sourceNames[source.id] || getSourceLabel(source)
 
   // ── Build folder data from source categories ─────────────────────────────────
-  const allSourceGroups = Object.values(groupBySource(points))
+  const allSourceGroups = Object.values(groupBySource(points.filter(p => !EXAM_META_TERMS.has(p.term))))
   const byCategory = {}
   allSourceGroups.forEach(({ source, points: srcPoints }) => {
     const cat = sourceCategories[source.id] || '__uncat__'
@@ -2194,8 +2194,9 @@ function App() {
       if (cloudPoints !== null) {
         // Merge cloud + local: cloud wins on conflict but local-enriched fields (example/exampleCN) are preserved
         setPoints(prev => {
-          if (cloudPoints.length === 0) return prev
-          const merged = new Map(cloudPoints.map(p => [p.id, p]))
+          const cleanCloud = cloudPoints.filter(p => !EXAM_META_TERMS.has(p.term))
+          if (cleanCloud.length === 0 && prev.length > 0) return prev
+          const merged = new Map(cleanCloud.map(p => [p.id, p]))
           prev.forEach(p => {
             if (!merged.has(p.id)) {
               merged.set(p.id, p)
