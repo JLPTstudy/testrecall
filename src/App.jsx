@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { supabase, syncPointsToCloud, loadPointsFromCloud, syncSettingsToCloud, loadSettingsFromCloud } from './lib/supabase'
 import Tesseract from 'tesseract.js'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -1909,11 +1910,90 @@ function App() {
   const [userTags, setUserTags] = useState(loadUserTags)
   const [sourceNames, setSourceNames] = useState(loadSourceNames)
   const [sourceCategories, setSourceCategories] = useState(loadSourceCategories)
+  const [user, setUser] = useState(null)
+  const [syncStatus, setSyncStatus] = useState('idle') // 'idle'|'syncing'|'synced'|'error'
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginSent, setLoginSent] = useState(false)
+  const syncTimerRef = useRef(null)
+
+  const loadFromCloud = useCallback(async (userId) => {
+    setSyncStatus('syncing')
+    try {
+      const [cloudPoints, cloudSettings] = await Promise.all([
+        loadPointsFromCloud(userId),
+        loadSettingsFromCloud(userId),
+      ])
+      if (cloudPoints !== null && cloudPoints.length > 0) {
+        setPoints(cloudPoints)
+        saveData(cloudPoints)
+      }
+      if (cloudSettings) {
+        if (cloudSettings.source_names) { setSourceNames(cloudSettings.source_names); saveSourceNames(cloudSettings.source_names) }
+        if (cloudSettings.source_categories) { setSourceCategories(cloudSettings.source_categories); saveSourceCategories(cloudSettings.source_categories) }
+        if (cloudSettings.user_tags) { setUserTags(cloudSettings.user_tags); saveUserTags(cloudSettings.user_tags) }
+      }
+      setSyncStatus('synced')
+    } catch {
+      setSyncStatus('error')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!supabase) return
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      if (session?.user) loadFromCloud(session.user.id)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null)
+      if (event === 'SIGNED_IN' && session?.user) loadFromCloud(session.user.id)
+    })
+    return () => subscription.unsubscribe()
+  }, [loadFromCloud])
 
   useEffect(() => { saveData(points) }, [points])
   useEffect(() => { saveUserTags(userTags) }, [userTags])
   useEffect(() => { saveSourceNames(sourceNames) }, [sourceNames])
   useEffect(() => { saveSourceCategories(sourceCategories) }, [sourceCategories])
+
+  // Debounced cloud sync for points
+  useEffect(() => {
+    if (!user?.id || !supabase) return
+    clearTimeout(syncTimerRef.current)
+    syncTimerRef.current = setTimeout(() => {
+      setSyncStatus('syncing')
+      syncPointsToCloud(user.id, points)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'))
+    }, 3000)
+  }, [points, user?.id])
+
+  // Cloud sync for settings
+  useEffect(() => {
+    if (!user?.id || !supabase) return
+    syncSettingsToCloud(user.id, {
+      source_names: sourceNames,
+      source_categories: sourceCategories,
+      user_tags: userTags,
+    }).catch(console.error)
+  }, [userTags, sourceNames, sourceCategories, user?.id])
+
+  const handleLogin = async () => {
+    if (!loginEmail.trim() || !supabase) return
+    await supabase.auth.signInWithOtp({
+      email: loginEmail.trim(),
+      options: { emailRedirectTo: window.location.href },
+    })
+    setLoginSent(true)
+  }
+
+  const handleLogout = async () => {
+    if (!supabase) return
+    await supabase.auth.signOut()
+    setUser(null)
+    setSyncStatus('idle')
+  }
 
   const addPoints = (newPoints) => {
     setPoints(prev => {
@@ -2052,12 +2132,32 @@ function App() {
             <h1 className="text-xl font-bold text-gray-900">
               📝 TestRecall
             </h1>
-            <button
-              onClick={clearAll}
-              className="text-sm text-gray-500 hover:text-red-600 transition-colors"
-            >
-              清空数据
-            </button>
+            <div className="flex items-center gap-3">
+              {supabase && (
+                user ? (
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${syncStatus === 'synced' ? 'bg-green-100 text-green-700' : syncStatus === 'syncing' ? 'bg-yellow-100 text-yellow-700' : syncStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {syncStatus === 'synced' ? '☁️ 已同步' : syncStatus === 'syncing' ? '⏳ 同步中' : syncStatus === 'error' ? '❌ 同步失败' : '☁️ 云同步'}
+                    </span>
+                    <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
+                    <button onClick={handleLogout} className="text-xs text-gray-400 hover:text-gray-600">退出</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="text-xs bg-blue-50 border border-blue-200 text-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-100"
+                  >
+                    登录同步
+                  </button>
+                )
+              )}
+              <button
+                onClick={clearAll}
+                className="text-sm text-gray-500 hover:text-red-600 transition-colors"
+              >
+                清空数据
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -2101,6 +2201,44 @@ function App() {
       <footer className="text-center py-6 text-sm text-gray-400">
         TestRecall - JLPT 日语考点记忆助手
       </footer>
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setShowLoginModal(false); setLoginSent(false); setLoginEmail('') }}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">登录账号</h2>
+            <p className="text-sm text-gray-500 mb-4">登录后数据自动云端同步，多设备共享</p>
+            {loginSent ? (
+              <div className="text-center py-4">
+                <div className="text-4xl mb-3">📧</div>
+                <p className="text-sm font-medium text-gray-800">验证邮件已发送</p>
+                <p className="text-xs text-gray-500 mt-1">请查收 {loginEmail} 的邮件，点击链接完成登录</p>
+                <button onClick={() => { setShowLoginModal(false); setLoginSent(false); setLoginEmail('') }} className="mt-4 text-sm text-blue-600 hover:underline">关闭</button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="email"
+                  placeholder="输入邮箱地址"
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
+                <button
+                  onClick={handleLogin}
+                  disabled={!loginEmail.trim()}
+                  className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  发送登录链接
+                </button>
+                <p className="text-xs text-gray-400 mt-3 text-center">无需密码，点击邮件链接即可登录</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
