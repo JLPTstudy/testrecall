@@ -730,7 +730,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
 }
 
 // Scan View Component
-function ScanView({ onAddPoints }) {
+function ScanView({ onAddPoints, isAdmin, onOpenSettings }) {
   const [text, setText] = useState('')
   const [imageDataUrl, setImageDataUrl] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -750,6 +750,16 @@ function ScanView({ onAddPoints }) {
   const handleAnalyze = async () => {
     if (!text.trim() && !imageDataUrl) return
     if (selectedLevels.length === 0) return
+
+    // Non-admin users must set their own API keys
+    if (!isAdmin) {
+      const hasGroq = !!localStorage.getItem('user_groq_key')
+      const hasGemini = !!localStorage.getItem('user_gemini_key')
+      if (!hasGroq || (!hasGemini && !!imageDataUrl)) {
+        onOpenSettings?.()
+        return
+      }
+    }
 
     setLoading(true)
     setError('')
@@ -933,12 +943,14 @@ function ScanView({ onAddPoints }) {
           ) : '🔍 AI 分析提取考点'}
         </button>
 
-        {(!getGroqKey() || !getGeminiKey()) && (
-          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            <p className="font-medium mb-1">⚠️ 需要配置 API Key 才能使用 AI 功能</p>
-            {!getGroqKey() && <div>· Groq Key（文字提取）未配置</div>}
-            {!getGeminiKey() && <div>· Gemini Key（图片识别）未配置</div>}
-            <p className="mt-1 text-xs">请点右上角 ⚙️ 设置 → 填入你的免费 API Key</p>
+        {!isAdmin && (!localStorage.getItem('user_groq_key') || !localStorage.getItem('user_gemini_key')) && (
+          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium mb-0.5">⚠️ 需要先配置 API Key</p>
+              {!localStorage.getItem('user_groq_key') && <p className="text-xs">· Groq Key（文字提取）未配置</p>}
+              {!localStorage.getItem('user_gemini_key') && <p className="text-xs">· Gemini Key（图片识别）未配置</p>}
+            </div>
+            <button onClick={onOpenSettings} className="flex-shrink-0 text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-medium">去设置</button>
           </div>
         )}
 
@@ -2289,7 +2301,7 @@ function App() {
 
       {/* Content */}
       <main className="py-8 px-4">
-        {view === 'scan' && <ScanView onAddPoints={addPoints} />}
+        {view === 'scan' && <ScanView onAddPoints={addPoints} isAdmin={user?.email === ADMIN_EMAIL} onOpenSettings={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }} />}
         {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} />}
         {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} />}
         {view === 'stats' && <StatisticsView points={points} />}
