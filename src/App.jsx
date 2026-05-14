@@ -1724,28 +1724,44 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
 }
 
 // Statistics View Component
-function FlashcardView({ points, sourceNames, sourceCategories, onReview, deckSource, setDeckSource, queue, setQueue, idx, setIdx, flipped, setFlipped, sessionStats, setSessionStats }) {
+function FlashcardView({ points, sourceNames, sourceCategories, onReview, deckSource, setDeckSource, queue, setQueue, idx, setIdx, flipped, setFlipped, sessionStats, setSessionStats, typeFilter, setTypeFilter, batchSize, setBatchSize }) {
 
   // build source options
   const allSources = [...new Map(points.map(p => [(p.source || {}).id, p.source])).values()].filter(Boolean)
 
-  const buildQueue = (src) => {
-    const pool = src === '__all__' ? points : points.filter(p => (p.source || {}).id === src)
-    // prioritise unseen / low-score, shuffle within tiers
+  const buildQueue = () => {
+    // Filter by source
+    let pool = deckSource === '__all__' ? points : points.filter(p => (p.source || {}).id === deckSource)
+    // Filter by type
+    if (typeFilter.size > 0 && typeFilter.size < 3) {
+      pool = pool.filter(p => typeFilter.has(p.type))
+    }
+    // Sort: never reviewed first, then by lastReviewedAt ascending (oldest first)
+    // This makes reviewed cards go to the back naturally
     const sorted = [...pool].sort((a, b) => {
-      const scoreA = a.memoryScore || 0, scoreB = b.memoryScore || 0
-      return scoreA - scoreB
+      const tA = a.lastReviewedAt ? new Date(a.lastReviewedAt).getTime() : 0
+      const tB = b.lastReviewedAt ? new Date(b.lastReviewedAt).getTime() : 0
+      return tA - tB
     })
-    return sorted
+    return sorted.slice(0, batchSize)
   }
 
   const startDeck = () => {
-    const q = buildQueue(deckSource)
+    const q = buildQueue()
     if (q.length === 0) return
     setQueue(q)
     setIdx(0)
     setFlipped(false)
     setSessionStats({ known: 0, again: 0 })
+  }
+
+  const toggleType = (type) => {
+    setTypeFilter(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) { if (next.size > 1) next.delete(type) } // keep at least one
+      else next.add(type)
+      return next
+    })
   }
 
   const current = queue?.[idx]
@@ -1792,29 +1808,70 @@ function FlashcardView({ points, sourceNames, sourceCategories, onReview, deckSo
 
   // ── Setup screen ──────────────────────────────────────────────────────────
   if (queue === null) {
-    const pool = deckSource === '__all__' ? points : points.filter(p => (p.source || {}).id === deckSource)
+    let pool = deckSource === '__all__' ? points : points.filter(p => (p.source || {}).id === deckSource)
+    if (typeFilter.size > 0 && typeFilter.size < 3) pool = pool.filter(p => typeFilter.has(p.type))
+    const actual = Math.min(batchSize, pool.length)
+    const typeOptions = [
+      { key: 'vocabulary', label: '单词' },
+      { key: 'grammar', label: '语法' },
+      { key: 'collocation', label: '搭配' },
+    ]
     return (
       <div className="max-w-md mx-auto py-12">
         <h2 className="text-2xl font-bold text-gray-800 mb-8 text-center">🃏 记忆卡片</h2>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <label className="block text-sm font-medium text-gray-700 mb-2">选择来源</label>
-          <select
-            value={deckSource}
-            onChange={e => setDeckSource(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="__all__">全部考点（{points.length} 个）</option>
-            {allSources.map(src => (
-              <option key={src.id} value={src.id}>
-                {getSourceLabel(src)}（{points.filter(p => (p.source || {}).id === src.id).length} 个）
-              </option>
-            ))}
-          </select>
-          <div className="flex justify-between text-xs text-gray-500 mb-6">
-            <span>本组：{pool.length} 张</span>
-            <span>已复习：{pool.filter(p => p.lastReviewedAt).length} 张</span>
-            <span>记住：{pool.filter(p => (p.memoryScore || 0) >= 3).length} 张</span>
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">来源</label>
+            <select
+              value={deckSource}
+              onChange={e => setDeckSource(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="__all__">全部考点（{points.length} 个）</option>
+              {allSources.map(src => (
+                <option key={src.id} value={src.id}>
+                  {getSourceLabel(src)}（{points.filter(p => (p.source || {}).id === src.id).length} 个）
+                </option>
+              ))}
+            </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">类型</label>
+            <div className="flex gap-2">
+              {typeOptions.map(({ key, label }) => {
+                const colors = TYPE_COLORS[key] || TYPE_COLORS.vocabulary
+                const active = typeFilter.has(key)
+                return (
+                  <button
+                    key={key}
+                    onClick={() => toggleType(key)}
+                    className={`flex-1 py-1.5 rounded-lg text-sm font-medium border transition-colors ${active ? `${colors.bg} ${colors.text} border-transparent` : 'bg-white text-gray-400 border-gray-200'}`}
+                  >{label}</button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">每次数量</label>
+            <div className="flex gap-2">
+              {[10, 20, 30, 40, 50].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setBatchSize(n)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium border transition-colors ${batchSize === n ? 'bg-blue-600 text-white border-transparent' : 'bg-white text-gray-500 border-gray-200 hover:border-blue-300'}`}
+                >{n}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-between text-xs text-gray-400 pt-1">
+            <span>本次复习：{actual} 张</span>
+            <span>已复习：{pool.filter(p => p.lastReviewedAt).length} 张</span>
+            <span>总计：{pool.length} 张</span>
+          </div>
+
           <button
             onClick={startDeck}
             disabled={pool.length === 0}
@@ -2104,6 +2161,8 @@ function App() {
   const [cardIdx, setCardIdx] = useState(0)
   const [cardFlipped, setCardFlipped] = useState(false)
   const [cardSessionStats, setCardSessionStats] = useState({ known: 0, again: 0 })
+  const [cardTypeFilter, setCardTypeFilter] = useState(new Set(['vocabulary', 'grammar', 'collocation']))
+  const [cardBatchSize, setCardBatchSize] = useState(20)
   const [sourceNames, setSourceNames] = useState(loadSourceNames)
   const [sourceCategories, setSourceCategories] = useState(loadSourceCategories)
   const [user, setUser] = useState(null)
@@ -2536,7 +2595,7 @@ function App() {
         {view === 'scan' && <ScanView onAddPoints={addPoints} isAdmin={user?.email === ADMIN_EMAIL} onOpenSettings={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }} />}
         {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} favorites={favorites} onToggleFavorite={toggleFavorite} selectedFolder={pointsFolder} setSelectedFolder={setPointsFolder} />}
         {view === 'favorites' && <FavoritesView points={points} favorites={favorites} onToggleFavorite={toggleFavorite} onDeletePoint={deletePoint} />}
-        {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} deckSource={cardDeckSource} setDeckSource={setCardDeckSource} queue={cardQueue} setQueue={setCardQueue} idx={cardIdx} setIdx={setCardIdx} flipped={cardFlipped} setFlipped={setCardFlipped} sessionStats={cardSessionStats} setSessionStats={setCardSessionStats} />}
+        {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} deckSource={cardDeckSource} setDeckSource={setCardDeckSource} queue={cardQueue} setQueue={setCardQueue} idx={cardIdx} setIdx={setCardIdx} flipped={cardFlipped} setFlipped={setCardFlipped} sessionStats={cardSessionStats} setSessionStats={setCardSessionStats} typeFilter={cardTypeFilter} setTypeFilter={setCardTypeFilter} batchSize={cardBatchSize} setBatchSize={setCardBatchSize} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
 
