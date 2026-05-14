@@ -2112,9 +2112,21 @@ function App() {
         loadPointsFromCloud(userId),
         loadSettingsFromCloud(userId),
       ])
-      if (cloudPoints !== null && cloudPoints.length > 0) {
-        setPoints(cloudPoints)
-        saveData(cloudPoints)
+      if (cloudPoints !== null) {
+        // Merge cloud + local: cloud wins on conflict (same id), local-only entries are kept
+        setPoints(prev => {
+          if (cloudPoints.length === 0) return prev
+          const merged = new Map(cloudPoints.map(p => [p.id, p]))
+          prev.forEach(p => { if (!merged.has(p.id)) merged.set(p.id, p) })
+          const result = [...merged.values()]
+          saveData(result)
+          // Upload any local-only points back to cloud so they're persisted
+          const localOnlyCount = result.length - cloudPoints.length
+          if (localOnlyCount > 0) {
+            syncPointsToCloud(userId, result).catch(() => {})
+          }
+          return result
+        })
       }
       if (cloudSettings) {
         if (cloudSettings.source_names) { setSourceNames(cloudSettings.source_names); saveSourceNames(cloudSettings.source_names) }
