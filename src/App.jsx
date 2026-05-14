@@ -616,8 +616,20 @@ function RubyText({ text }) {
 function FileUpload({ onTextExtracted, onError, disabled }) {
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadSeconds, setUploadSeconds] = useState(0)
   const [previewUrl, setPreviewUrl] = useState(null)
   const fileInputRef = useRef(null)
+  const uploadTimerRef = useRef(null)
+
+  useEffect(() => {
+    if (uploading) {
+      setUploadSeconds(0)
+      uploadTimerRef.current = setInterval(() => setUploadSeconds(s => s + 1), 1000)
+    } else {
+      clearInterval(uploadTimerRef.current)
+    }
+    return () => clearInterval(uploadTimerRef.current)
+  }, [uploading])
 
   const handleFile = async (file) => {
     if (!file) return
@@ -715,6 +727,7 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
           <span className="text-gray-600">正在识别正文和手写批注...</span>
+          <span className="text-sm text-gray-400">{uploadSeconds}s · 预计 10–30 秒</span>
         </div>
       ) : previewUrl ? (
         <div className="flex flex-col items-center gap-2">
