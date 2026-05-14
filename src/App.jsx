@@ -2163,18 +2163,23 @@ function App() {
   useEffect(() => { saveFavorites(favorites) }, [favorites])
   useEffect(() => { trackEvent(null, 'page_view') }, [])
 
-  // Auto-load built-in data for new users
+  // Auto-load built-in data for new users (merge, never overwrite)
   useEffect(() => {
     if (localStorage.getItem('tr_builtin_loaded')) return
-    if (points.length > 0) { localStorage.setItem('tr_builtin_loaded', '1'); return }
     fetch('./import_2021_12.json')
       .then(r => r.json())
       .then(pts => {
-        setPoints(pts)
-        const names = { 'tr_builtin_loaded': '1' }
         localStorage.setItem('tr_builtin_loaded', '1')
         setSourceNames(prev => ({ ...prev, '2021.12-n1-pdf': '2021.12 N1 真题' }))
-        showToast(`已加载内置 2021.12 N1 真题考点（${pts.length} 个）`, 'success')
+        setPoints(prev => {
+          // Merge: keep all existing points, only add built-in ones not already present
+          const existing = new Map(prev.map(p => [p.id, p]))
+          let added = 0
+          pts.forEach(p => { if (!existing.has(p.id)) { existing.set(p.id, p); added++ } })
+          if (added === 0) return prev
+          showToast(`已加载内置 2021.12 N1 真题考点（${added} 个新增）`, 'success')
+          return [...existing.values()]
+        })
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
