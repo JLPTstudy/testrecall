@@ -1995,11 +1995,15 @@ function App() {
   }, [userTags, sourceNames, sourceCategories, user?.id])
 
   const handleGoogleLogin = async () => {
-    if (!supabase) return
-    await supabase.auth.signInWithOAuth({
+    if (!supabase) {
+      showToast('登录服务未初始化，请刷新页面', 'error')
+      return
+    }
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.href },
+      options: { redirectTo: window.location.origin + window.location.pathname },
     })
+    if (error) showToast('登录失败：' + error.message, 'error')
   }
 
   const handleLogout = async () => {
@@ -2242,7 +2246,7 @@ function App() {
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${toast.type === 'success' ? 'bg-green-600' : 'bg-gray-700'}`}>
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-gray-700'}`}>
           {toast.msg}
         </div>
       )}
