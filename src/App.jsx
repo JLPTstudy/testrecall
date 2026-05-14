@@ -501,7 +501,7 @@ ${sourcesHTML}
 
 const fillMissingExamples = async (points, onUpdate, onProgress) => {
   // Re-fill if missing example, missing CN translation, or missing furigana notation
-  const toFill = points.filter(p => !p.example || !p.exampleCN || !p.example.includes('['))
+  const toFill = points.filter(p => !p.example || !p.exampleCN || !p.example.includes('[')).slice(0, 50)
   if (toFill.length === 0) return 0
 
   const BATCH = 8
@@ -1473,7 +1473,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                 ? (fillProgress?.error
                     ? `⚠️ 错误: ${fillProgress.error.slice(0, 40)}… (${fillProgress.done}/${fillProgress.total})`
                     : `✨ 补全中… ${fillProgress ? `${fillProgress.done}/${fillProgress.total}` : ''}`)
-                : missing > 0 ? `✨ 补全例句（${missing} 个缺失）` : '✨ 例句已全'}
+                : missing > 0 ? `✨ 补全例句（每次最多50个，剩余${missing}个）` : '✨ 例句已全'}
             </button>
           )
         })()}
@@ -2190,11 +2190,19 @@ function App() {
         loadSettingsFromCloud(userId),
       ])
       if (cloudPoints !== null) {
-        // Merge cloud + local: cloud wins on conflict (same id), local-only entries are kept
+        // Merge cloud + local: cloud wins on conflict but local-enriched fields (example/exampleCN) are preserved
         setPoints(prev => {
           if (cloudPoints.length === 0) return prev
           const merged = new Map(cloudPoints.map(p => [p.id, p]))
-          prev.forEach(p => { if (!merged.has(p.id)) merged.set(p.id, p) })
+          prev.forEach(p => {
+            if (!merged.has(p.id)) {
+              merged.set(p.id, p)
+            } else {
+              // Keep cloud as base, but preserve local-only example sentences
+              const cloud = merged.get(p.id)
+              if (!cloud.example && p.example) merged.set(p.id, { ...cloud, example: p.example, exampleCN: p.exampleCN || cloud.exampleCN })
+            }
+          })
           const result = [...merged.values()]
           saveData(result)
           // Upload any local-only points back to cloud so they're persisted
