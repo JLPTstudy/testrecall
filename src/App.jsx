@@ -2422,9 +2422,25 @@ function App() {
                     {user.email === ADMIN_EMAIL && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">👑 管理员</span>
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${syncStatus === 'synced' ? 'bg-green-100 text-green-700' : syncStatus === 'syncing' ? 'bg-yellow-100 text-yellow-700' : syncStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <button
+                      onClick={async () => {
+                        if (syncStatus === 'syncing') return
+                        setSyncStatus('syncing')
+                        try {
+                          await syncPointsToCloud(user.id, points)
+                          const cloud = await loadPointsFromCloud(user.id)
+                          setSyncStatus('synced')
+                          showToast(`云端已有 ${cloud?.length ?? 0} 条，本地 ${points.length} 条，上传完成`, 'success')
+                        } catch (e) {
+                          setSyncStatus('error')
+                          showToast('同步失败：' + e.message, 'error')
+                        }
+                      }}
+                      className={`text-xs px-2 py-0.5 rounded-full ${syncStatus === 'synced' ? 'bg-green-100 text-green-700' : syncStatus === 'syncing' ? 'bg-yellow-100 text-yellow-700' : syncStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}
+                      title="点击强制重新同步"
+                    >
                       {syncStatus === 'synced' ? '☁️ 已同步' : syncStatus === 'syncing' ? '⏳ 同步中' : syncStatus === 'error' ? '❌ 同步失败' : '☁️ 云同步'}
-                    </span>
+                    </button>
                     <span className="text-xs text-gray-400 hidden sm:block">{user.email}</span>
                     <button onClick={handleLogout} className="text-xs text-gray-400 hover:text-gray-600">退出</button>
                   </div>
