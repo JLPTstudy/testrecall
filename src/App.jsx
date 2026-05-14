@@ -1600,7 +1600,7 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                               } else if (point.type === 'collocation') {
                                 examLines.push('📝 言い換え：选出意思最近的表达')
                                 examLines.push('📝 用法：判断哪句使用正确')
-                                examLines.push('⚠️ 考整体语义，不能按字面理解')
+                                if (/[一-鿿]/.test(point.term)) examLines.push('⚠️ 考整体语义，不能按字面理解')
                               } else {
                                 examLines.push('📝 言い換え：选出意思最近的词')
                                 examLines.push('📝 文脈規定：选词填入句中空白')
