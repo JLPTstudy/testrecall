@@ -1917,6 +1917,7 @@ function App() {
   const [loginSent, setLoginSent] = useState(false)
   const [toast, setToast] = useState(null) // { msg, type }
   const syncTimerRef = useRef(null)
+  const loginPollRef = useRef(null)
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type })
@@ -1999,6 +2000,17 @@ function App() {
       options: { emailRedirectTo: window.location.href },
     })
     setLoginSent(true)
+    // Poll for session every 2s (works when link is opened in this browser)
+    clearInterval(loginPollRef.current)
+    loginPollRef.current = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        clearInterval(loginPollRef.current)
+        // onAuthStateChange will handle the rest
+      }
+    }, 2000)
+    // Stop polling after 10 minutes
+    setTimeout(() => clearInterval(loginPollRef.current), 10 * 60 * 1000)
   }
 
   const handleLogout = async () => {
@@ -2231,9 +2243,20 @@ function App() {
             {loginSent ? (
               <div className="text-center py-4">
                 <div className="text-4xl mb-3">📧</div>
-                <p className="text-sm font-medium text-gray-800">验证邮件已发送</p>
-                <p className="text-xs text-gray-500 mt-1">请查收 {loginEmail} 的邮件，点击链接完成登录</p>
-                <button onClick={() => { setShowLoginModal(false); setLoginSent(false); setLoginEmail('') }} className="mt-4 text-sm text-blue-600 hover:underline">关闭</button>
+                <p className="text-sm font-medium text-gray-800">验证邮件已发送至</p>
+                <p className="text-sm font-bold text-blue-600 mt-0.5">{loginEmail}</p>
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-left">
+                  <p className="text-xs font-semibold text-amber-800 mb-1">⚠️ 重要：</p>
+                  <p className="text-xs text-amber-700">请在<b>当前这台电脑的浏览器</b>中打开邮件，点击登录链接。</p>
+                  <p className="text-xs text-amber-700 mt-1">若在手机上点击，只有手机会登录，本页面不会更新。</p>
+                </div>
+                <div className="mt-3 flex items-center gap-1.5 justify-center">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay:'0ms'}}/>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay:'150ms'}}/>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay:'300ms'}}/>
+                  <span className="text-xs text-gray-400 ml-1">等待登录中…</span>
+                </div>
+                <button onClick={() => { clearInterval(loginPollRef.current); setShowLoginModal(false); setLoginSent(false); setLoginEmail('') }} className="mt-4 text-xs text-gray-400 hover:text-gray-600">取消</button>
               </div>
             ) : (
               <>
