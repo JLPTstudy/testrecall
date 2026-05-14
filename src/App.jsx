@@ -2207,18 +2207,18 @@ function App() {
             </h1>
             <div className="flex items-center gap-3">
               {/* Announcement */}
-              <button onClick={openAnnouncement} className="relative text-xl text-gray-400 hover:text-gray-700 transition-colors" title="公告">
-                📢
+              <button onClick={openAnnouncement} className="relative flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg px-2.5 py-1.5 transition-colors">
+                🔔 公告
                 {hasNewAnnouncement && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />}
               </button>
               {/* Contact */}
-              <button onClick={() => setShowContact(true)} className="text-xl text-gray-400 hover:text-gray-700 transition-colors" title="联系开发者">
-                💬
+              <button onClick={() => setShowContact(true)} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg px-2.5 py-1.5 transition-colors">
+                💬 联系
               </button>
               {/* Admin dashboard */}
               {user?.email === ADMIN_EMAIL && (
-                <button onClick={openAdminDash} className="text-xl text-gray-400 hover:text-gray-700 transition-colors" title="管理员后台">
-                  📊
+                <button onClick={openAdminDash} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg px-2.5 py-1.5 transition-colors">
+                  📊 后台
                 </button>
               )}
               {supabase && (
@@ -2244,10 +2244,9 @@ function App() {
               )}
               <button
                 onClick={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }}
-                className="text-xl text-gray-400 hover:text-gray-700 transition-colors"
-                title="设置 API Key"
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg px-2.5 py-1.5 transition-colors"
               >
-                ⚙️
+                ⚙️ 设置
               </button>
               <button
                 onClick={clearAll}
