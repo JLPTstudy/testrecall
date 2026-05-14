@@ -1835,6 +1835,11 @@ function FlashcardView({ points, sourceNames, sourceCategories, onReview, deckSo
     <div className="max-w-lg mx-auto py-8">
       {/* Progress */}
       <div className="flex items-center gap-3 mb-6">
+        <button
+          onClick={() => { setQueue(null); setSessionStats({ known: 0, again: 0 }) }}
+          className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-2 py-1 rounded hover:bg-gray-100 transition-colors"
+          title="退出复习"
+        >✕ 退出</button>
         <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
           <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
         </div>
