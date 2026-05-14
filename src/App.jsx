@@ -2427,10 +2427,25 @@ function App() {
                         if (syncStatus === 'syncing') return
                         setSyncStatus('syncing')
                         try {
-                          await syncPointsToCloud(user.id, points)
+                          // 1. Pull all cloud data (paginated)
                           const cloud = await loadPointsFromCloud(user.id)
+                          // 2. Merge cloud + local (union by id)
+                          setPoints(prev => {
+                            const merged = new Map((cloud || []).map(p => [p.id, p]))
+                            prev.forEach(p => { if (!merged.has(p.id)) merged.set(p.id, p) })
+                            const result = [...merged.values()]
+                            saveData(result)
+                            return result
+                          })
+                          // 3. Upload merged result back to cloud
+                          const merged2 = (() => {
+                            const m = new Map((cloud || []).map(p => [p.id, p]))
+                            points.forEach(p => { if (!m.has(p.id)) m.set(p.id, p) })
+                            return [...m.values()]
+                          })()
+                          await syncPointsToCloud(user.id, merged2)
                           setSyncStatus('synced')
-                          showToast(`云端已有 ${cloud?.length ?? 0} 条，本地 ${points.length} 条，上传完成`, 'success')
+                          showToast(`同步完成：云端 ${cloud?.length ?? 0} 条 + 本地合并后共 ${merged2.length} 条`, 'success')
                         } catch (e) {
                           setSyncStatus('error')
                           showToast('同步失败：' + e.message, 'error')
