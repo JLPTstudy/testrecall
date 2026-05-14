@@ -13,6 +13,8 @@ const GEMINI_VISION_MODEL = 'gemini-2.5-flash'
 const getGroqKey = () => localStorage.getItem('user_groq_key') || import.meta.env.VITE_GROQ_API_KEY || ''
 const getGeminiKey = () => localStorage.getItem('user_gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || ''
 
+const ADMIN_EMAIL = 'rdjdaozai@gmail.com'
+
 const OCR_LANGS = 'jpn+chi_sim+eng'
 const PDF_OCR_SCALE = 2
 
@@ -2186,6 +2188,9 @@ function App() {
               {supabase && (
                 user ? (
                   <div className="flex items-center gap-2">
+                    {user.email === ADMIN_EMAIL && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">👑 管理员</span>
+                    )}
                     <span className={`text-xs px-2 py-0.5 rounded-full ${syncStatus === 'synced' ? 'bg-green-100 text-green-700' : syncStatus === 'syncing' ? 'bg-yellow-100 text-yellow-700' : syncStatus === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
                       {syncStatus === 'synced' ? '☁️ 已同步' : syncStatus === 'syncing' ? '⏳ 同步中' : syncStatus === 'error' ? '❌ 同步失败' : '☁️ 云同步'}
                     </span>
