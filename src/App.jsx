@@ -734,6 +734,8 @@ function ScanView({ onAddPoints, isAdmin, onOpenSettings }) {
   const [text, setText] = useState('')
   const [imageDataUrl, setImageDataUrl] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [loadingSeconds, setLoadingSeconds] = useState(0)
+  const loadingTimerRef = useRef(null)
   const [error, setError] = useState('')
   const [candidates, setCandidates] = useState([])
   const [selected, setSelected] = useState({})
@@ -762,6 +764,8 @@ function ScanView({ onAddPoints, isAdmin, onOpenSettings }) {
     }
 
     setLoading(true)
+    setLoadingSeconds(0)
+    loadingTimerRef.current = setInterval(() => setLoadingSeconds(s => s + 1), 1000)
     setError('')
     setCandidates([])
     setSelected({})
@@ -822,6 +826,7 @@ function ScanView({ onAddPoints, isAdmin, onOpenSettings }) {
     } catch (err) {
       setError(err.message || '分析失败，请重试')
     } finally {
+      clearInterval(loadingTimerRef.current)
       setLoading(false)
     }
   }
@@ -933,12 +938,17 @@ function ScanView({ onAddPoints, isAdmin, onOpenSettings }) {
           className="mt-4 w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              AI 分析中...
+            <span className="flex flex-col items-center justify-center gap-1">
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                AI 分析中… {loadingSeconds}s
+              </span>
+              <span className="text-xs opacity-75">
+                {imageDataUrl ? '图片/PDF 约需 15–40 秒，请耐心等待' : '文字内容约需 5–15 秒'}
+              </span>
             </span>
           ) : '🔍 AI 分析提取考点'}
         </button>
@@ -1915,23 +1925,33 @@ function StatisticsView({ points }) {
       {/* High Frequency Points */}
       {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">🔥 高频考点</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-1">🔥 高频考点</h3>
+          <p className="text-xs text-gray-400 mb-4">出现次数越多，JLPT 考试越可能直接考察</p>
           <div className="space-y-2">
             {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).slice(0, 10).map((p, idx) => {
               const colors = TYPE_COLORS[p.type] || TYPE_COLORS.vocabulary
+              const examHint = p.type === 'grammar'
+                ? '常见考法：选填句中空格、判断语法形式是否正确'
+                : p.type === 'collocation'
+                ? '常见考法：选出与句意搭配最合适的固定表达'
+                : '常见考法：选出划线词的最近义词或在句中填入合适词汇'
               return (
-                <div key={idx} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
-                  <span className="text-2xl font-bold text-gray-400 w-8">{idx + 1}</span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-900">{p.term}</span>
-                      {p.reading && <span className="text-sm text-gray-500">({p.reading})</span>}
+                <div key={idx} className="p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-4">
+                    <span className="text-2xl font-bold text-gray-400 w-8 flex-shrink-0">{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-900">{p.term}</span>
+                        {p.reading && <span className="text-sm text-gray-500">({p.reading})</span>}
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text}`}>{TYPE_LABELS[p.type] || p.type}</span>
+                      </div>
+                      {p.meaningCN && <div className="text-sm text-gray-600 mt-0.5">{p.meaningCN}</div>}
+                      <div className="text-xs text-blue-500 mt-1">📝 {examHint}</div>
                     </div>
-                    {p.meaningCN && <div className="text-sm text-gray-600">{p.meaningCN}</div>}
+                    <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${colors.bg} ${colors.text}`}>
+                      ×{p.occurrenceCount || 1}
+                    </span>
                   </div>
-                  <span className={`px-2 py-1 rounded text-sm font-bold ${colors.bg} ${colors.text}`}>
-                    ×{p.occurrenceCount || 1}
-                  </span>
                 </div>
               )
             })}
