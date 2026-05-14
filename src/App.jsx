@@ -166,19 +166,26 @@ const JSON_EXAMPLE = `[{"term":"もくろむ","type":"vocabulary","reading":"も
  {"term":"気が置けない","type":"collocation","meaning_cn":"不必拘束、可以推心置腹"}]`
 
 const buildExtractionRules = (levels) => {
-  const levelStr = levels.join('/') // e.g. N1/N2
-  const excludeN4N5Grammar = !levels.includes('N4') && !levels.includes('N5')
+  const levelStr = levels.join('/')
+  const highOnly = !levels.includes('N4') && !levels.includes('N5')
+  const excludeGrammarNote = highOnly
+    ? '。【絶対禁止】〜ておく・〜てみる・〜ばかり・〜はず・〜わけ・〜なくても・〜てしまう・〜ながら・〜たり 等N4-N5基础语法一律不提取'
+    : ''
+  const excludeVocabNote = highOnly
+    ? `。【絶対禁止】不提取N3/N4/N5程度的常用词，例：学校・会社・友達・仕事・時間・先生・電車・食べる・読む・書く・話す・聞く・使う・思う・知る・始まる・終わる・できる・なる・ほしい・好き・大切・必要・十分・簡単・難しい・多い・少ない・新しい・古い・高い・安い・速い 等，即使出现在题目中也不提取`
+    : ''
   return `
-类型：
-- grammar = ${levelStr}级别语法句型，通常是复合助词或接续形式，例：〜にもかかわらず・〜を皮切りに・〜に際して・〜ずにはおかない・〜かねない・〜をもって・〜に至る${excludeN4N5Grammar ? '。注意：〜ておく・〜てみる・〜ばかり・〜はず・〜わけ・〜なくても 等N4-N5基础语法【不要提取】' : ''}。grammar类型必须额外返回grammar_style字段：'daily'（日常口语/会话中常用）或'formal'（书面语/正式文章中使用）
-- collocation = 两词以上的惯用表达，整体含义无法从各词字面推导（例：気が置けない・手が込む・目を見張る）。普通的「名词+助词」短语不是collocation
-- vocabulary = ${levelStr}范围词汇（名词/动词/形容词/副词），动词写辞书形
+類型：
+- grammar = ${levelStr}級別語法句型，通常是複合助詞或接続形式，例：〜にもかかわらず・〜を皮切りに・〜に際して・〜ずにはおかない・〜かねない・〜をもって・〜に至る${excludeGrammarNote}。grammar類型必須額外返回grammar_style字段：'daily'（日常口語/会話中常用）或'formal'（書面語/正式文章中使用）
+- collocation = 两词以上的惯用表达，整体含义无法从各词字面推导（例：気が置けない・手が込む・目を見張る）。普通的「名词+助词」短語不是collocation
+- vocabulary = 仅限${levelStr}程度词汇（名詞/動詞/形容詞/副詞），動詞寫辭書形${excludeVocabNote}
 
 提取要求：
-1. 提取${levelStr}范围内的词汇，不因"太普通"跳过（只排除する/ある/いる/行く/来る/見る等极基础动词、助词、数字）
-2. 题干中被考察的词必须提取
-3. 4个选项全部检查；选项是完整句子时，拆出各关键词单独提取，不要整句归为collocation
-4. 不提取「文法」「語彙」「読解」「聴解」等章节标题`
+1. 严格只提取${levelStr}程度词汇，级别不够的词哪怕出现在题目中也不提取
+2. 题干中被直接考查（下划线/括号标注）的目标词必须提取
+3. 4个选项全部检查；选项是完整句子时，拆出${levelStr}级别关键词单独提取
+4. 不提取「文法」「語彙」「読解」「聴解」等章节标题
+5. 宁可少抓，不可抓低级别词凑数`
 }
 
 const buildTextPrompt = (levels) =>
@@ -685,7 +692,10 @@ function FileUpload({ onTextExtracted, onError, disabled }) {
             <span className="text-gray-500"> 或拖拽文件到此处</span>
           </div>
           <div className="text-xs text-gray-400">
-            支持 PDF、图片（JPG/PNG/GIF/WebP）识别正文和手写批注，或文本文件（TXT/MD）
+            支持 PDF · 图片（JPG/PNG/GIF/WebP）· 文本（TXT/MD）
+          </div>
+          <div className="text-xs text-orange-400 mt-0.5">
+            PDF 建议 20MB / 30页以内，过大请拆分后分批上传
           </div>
         </div>
       )}
