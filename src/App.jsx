@@ -4,14 +4,14 @@ import Tesseract from 'tesseract.js'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 // Groq API — text extraction & normalization
-const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || ''
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const GROQ_TEXT_MODEL = 'llama-3.3-70b-versatile'
 const GROQ_FALLBACK_MODEL = 'llama-3.1-8b-instant'
-
-// Gemini API — image vision (much better Japanese OCR, free tier)
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 const GEMINI_VISION_MODEL = 'gemini-2.5-flash'
+
+// API keys: user-supplied (localStorage) take priority over env vars
+const getGroqKey = () => localStorage.getItem('user_groq_key') || import.meta.env.VITE_GROQ_API_KEY || ''
+const getGeminiKey = () => localStorage.getItem('user_gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || ''
 
 const OCR_LANGS = 'jpn+chi_sim+eng'
 const PDF_OCR_SCALE = 2
@@ -267,7 +267,7 @@ const isGeminiOverloaded = (status, msg) =>
 async function callGeminiAPI(geminiParts, temperature = 0.2, retries = 3) {
   for (let retryIdx = 0; retryIdx <= retries; retryIdx++) {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_VISION_MODEL}:generateContent?key=${getGeminiKey()}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -317,7 +317,7 @@ async function callGroq(messages, model, temperature = 0.2) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_KEY}`,
+        'Authorization': `Bearer ${getGroqKey()}`,
       },
       body: JSON.stringify({ model: m, messages, temperature, max_tokens: 8192 }),
     })
@@ -326,7 +326,7 @@ async function callGroq(messages, model, temperature = 0.2) {
       if (response.status === 429) {
         if (m !== GROQ_FALLBACK_MODEL) return attempt(GROQ_FALLBACK_MODEL)
         // Both Groq models exhausted — fall back to Gemini if key is configured
-        if (GEMINI_KEY) return callGeminiText(messages, temperature)
+        if (getGeminiKey()) return callGeminiText(messages, temperature)
         throw new Error('Groq 每日 token 已用尽，请明天再试或配置 Gemini API Key')
       }
       throw new Error(err.error?.message || 'Groq API请求失败')
@@ -737,7 +737,7 @@ function ScanView({ onAddPoints }) {
       const textPrompt = buildTextPrompt(selectedLevels)
       let content
       if (imageDataUrl) {
-        content = GEMINI_KEY
+        content = getGeminiKey()
           ? await callGeminiVision(imageDataUrl, visionPrompt)
           : await callGroq(
               [{ role: 'user', content: [
@@ -908,10 +908,12 @@ function ScanView({ onAddPoints }) {
           ) : '🔍 AI 分析提取考点'}
         </button>
 
-        {(!GROQ_KEY || !GEMINI_KEY) && (
+        {(!getGroqKey() || !getGeminiKey()) && (
           <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            {!GROQ_KEY && <div>需要配置 <code>VITE_GROQ_API_KEY</code>（文字提取）</div>}
-            {!GEMINI_KEY && <div>需要配置 <code>VITE_GEMINI_API_KEY</code>（图片识别，从 aistudio.google.com 免费获取）</div>}
+            <p className="font-medium mb-1">⚠️ 需要配置 API Key 才能使用 AI 功能</p>
+            {!getGroqKey() && <div>· Groq Key（文字提取）未配置</div>}
+            {!getGeminiKey() && <div>· Gemini Key（图片识别）未配置</div>}
+            <p className="mt-1 text-xs">请点右上角 ⚙️ 设置 → 填入你的免费 API Key</p>
           </div>
         )}
 
@@ -2029,6 +2031,20 @@ function App() {
     setSyncStatus('idle')
   }
 
+  // Settings modal
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsGroqKey, setSettingsGroqKey] = useState(() => localStorage.getItem('user_groq_key') || '')
+  const [settingsGeminiKey, setSettingsGeminiKey] = useState(() => localStorage.getItem('user_gemini_key') || '')
+
+  const saveSettings = () => {
+    if (settingsGroqKey.trim()) localStorage.setItem('user_groq_key', settingsGroqKey.trim())
+    else localStorage.removeItem('user_groq_key')
+    if (settingsGeminiKey.trim()) localStorage.setItem('user_gemini_key', settingsGeminiKey.trim())
+    else localStorage.removeItem('user_gemini_key')
+    setShowSettings(false)
+    showToast('✅ 设置已保存')
+  }
+
   const addPoints = (newPoints) => {
     setPoints(prev => {
       const updated = [...prev]
@@ -2186,6 +2202,13 @@ function App() {
                 )
               )}
               <button
+                onClick={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }}
+                className="text-xl text-gray-400 hover:text-gray-700 transition-colors"
+                title="设置 API Key"
+              >
+                ⚙️
+              </button>
+              <button
                 onClick={clearAll}
                 className="text-sm text-gray-500 hover:text-red-600 transition-colors"
               >
@@ -2240,6 +2263,53 @@ function App() {
       {toast && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all ${toast.type === 'success' ? 'bg-green-600' : 'bg-gray-700'}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSettings(false)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">⚙️ API Key 设置</h2>
+            <p className="text-sm text-gray-500 mb-5">填入你自己的免费 API Key，数据保存在本设备</p>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Groq API Key <span className="text-xs text-gray-400">（用于文字提取分析）</span></label>
+              <input
+                type="password"
+                placeholder="gsk_..."
+                value={settingsGroqKey}
+                onChange={e => setSettingsGroqKey(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline mt-1 inline-block">
+                → 免费获取 Groq Key（console.groq.com）
+              </a>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Gemini API Key <span className="text-xs text-gray-400">（用于图片/PDF识别）</span></label>
+              <input
+                type="password"
+                placeholder="AIza..."
+                value={settingsGeminiKey}
+                onChange={e => setSettingsGeminiKey(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline mt-1 inline-block">
+                → 免费获取 Gemini Key（aistudio.google.com）
+              </a>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-5 text-xs text-blue-700">
+              Key 仅存储在你的本地浏览器，不会上传至服务器，网站作者无法获取。
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setShowSettings(false)} className="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2.5 text-sm hover:bg-gray-50">取消</button>
+              <button onClick={saveSettings} className="flex-1 bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700">保存</button>
+            </div>
+          </div>
         </div>
       )}
 
