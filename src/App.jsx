@@ -1565,17 +1565,43 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                           <thead className="text-xs text-gray-500 border-b border-gray-100">
                             <tr>
                               <th className="py-2 pr-3 font-medium">考点</th>
-                              <th className="py-2 px-3 font-medium hidden md:table-cell">读音/级别</th>
+                              <th className="py-2 px-3 font-medium hidden md:table-cell">读音</th>
                               <th className="py-2 px-3 font-medium">中文说明</th>
-                              <th className="py-2 pl-3 font-medium hidden lg:table-cell">例句/提示</th>
-                              <th className="py-2 pl-3 font-medium">标签</th>
+                              <th className="py-2 pl-3 font-medium hidden lg:table-cell">例句</th>
+                              <th className="py-2 pl-3 font-medium">考察方式</th>
                               <th className="py-2 pl-2 font-medium w-6"></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
                             {sectionPoints.map((point) => {
                               const colors = TYPE_COLORS[point.type] || TYPE_COLORS.vocabulary
-                              const pointTags = point.customTags || []
+                              // Related collocations: other collocation/grammar points sharing a CJK character
+                              const termChars = [...(point.term || '')].filter(c => /[一-鿿぀-ヿ]/.test(c))
+                              const relatedCollocations = termChars.length > 0
+                                ? points.filter(p =>
+                                    p.id !== point.id &&
+                                    (p.type === 'collocation' || p.type === 'grammar') &&
+                                    termChars.some(c => (p.term || '').includes(c))
+                                  ).slice(0, 3)
+                                : []
+                              // Dynamic exam hint
+                              const examLines = []
+                              if (point.type === 'grammar') {
+                                if (point.connection) examLines.push(`📎 接続：${point.connection}`)
+                                examLines.push('📝 文の文法1：选填正确接续形式')
+                                examLines.push('📝 文の文法2：4词重排成句')
+                                if (point.grammarStyle === 'formal') examLines.push('📖 书面语・正式文体常用')
+                                else if (point.grammarStyle === 'daily') examLines.push('💬 口语・日常会话常用')
+                              } else if (point.type === 'collocation') {
+                                examLines.push('📝 言い換え：选出意思最近的表达')
+                                examLines.push('📝 用法：判断哪句使用正确')
+                                examLines.push('⚠️ 考整体语义，不能按字面理解')
+                              } else {
+                                examLines.push('📝 言い換え：选出意思最近的词')
+                                examLines.push('📝 文脈規定：选词填入句中空白')
+                                examLines.push('📝 用法：判断哪个句子用法正确')
+                                if (point.partOfSpeech) examLines.push(`品词：${point.partOfSpeech}`)
+                              }
                               return (
                                 <tr key={point.id} className="align-top">
                                   <td className="py-3 pr-3">
@@ -1585,8 +1611,8 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                         {TYPE_LABELS[point.type]}
                                       </span>
                                       {(point.occurrenceCount || 1) > 1 && (
-                                        <span className="px-2 py-0.5 rounded bg-gray-100 text-xs text-gray-500">
-                                          ×{point.occurrenceCount}
+                                        <span className="px-2 py-0.5 rounded bg-orange-50 text-xs text-orange-500 font-medium">
+                                          🔥×{point.occurrenceCount}
                                         </span>
                                       )}
                                     </div>
@@ -1605,26 +1631,23 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                       ? <><RubyText text={point.example} />{point.exampleCN && <div className="mt-1 text-xs text-gray-400">{point.exampleCN}</div>}</>
                                       : (point.usage || '-')}
                                     {point.related?.length > 0 && (
-                                      <div className="mt-1 text-xs text-gray-400">
-                                        相关：{point.related.join('、')}
-                                      </div>
+                                      <div className="mt-1 text-xs text-gray-400">相关：{point.related.join('、')}</div>
                                     )}
                                   </td>
-                                  <td className="py-3 pl-3">
-                                    {point.type === 'grammar' && (
-                                      <div className="flex flex-col gap-1">
-                                        <button
-                                          onClick={() => onUpdateGrammarStyle(point.id, point.grammarStyle === 'daily' ? null : 'daily')}
-                                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${point.grammarStyle === 'daily' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400 hover:bg-green-50 hover:text-green-600'}`}
-                                        >
-                                          日常可用
-                                        </button>
-                                        <button
-                                          onClick={() => onUpdateGrammarStyle(point.id, point.grammarStyle === 'formal' ? null : 'formal')}
-                                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${point.grammarStyle === 'formal' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600'}`}
-                                        >
-                                          书面用语
-                                        </button>
+                                  <td className="py-3 pl-3 min-w-[160px]">
+                                    <div className="space-y-0.5">
+                                      {examLines.map((line, i) => (
+                                        <div key={i} className="text-xs text-gray-500 leading-5">{line}</div>
+                                      ))}
+                                    </div>
+                                    {relatedCollocations.length > 0 && (
+                                      <div className="mt-2 pt-2 border-t border-gray-100">
+                                        <div className="text-xs text-gray-400 mb-1">相关搭配：</div>
+                                        {relatedCollocations.map(r => (
+                                          <div key={r.id} className="text-xs text-indigo-600 leading-5">
+                                            · {r.term}{r.meaningCN ? `（${r.meaningCN}）` : ''}
+                                          </div>
+                                        ))}
                                       </div>
                                     )}
                                   </td>
