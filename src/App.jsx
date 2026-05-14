@@ -267,6 +267,17 @@ const saveSourceCategories = (cats) => {
   localStorage.setItem('testrecall_source_categories', JSON.stringify(cats))
 }
 
+const loadFavorites = () => {
+  try {
+    const saved = localStorage.getItem('testrecall_favorites')
+    return saved ? new Set(JSON.parse(saved)) : new Set()
+  } catch { return new Set() }
+}
+
+const saveFavorites = (favs) => {
+  localStorage.setItem('testrecall_favorites', JSON.stringify([...favs]))
+}
+
 const buildSourceMeta = (file, kind) => ({
   id: `${kind}-${file.name}-${file.size}-${file.lastModified}`,
   title: file.name,
@@ -348,13 +359,15 @@ async function callGroq(messages, model, temperature = 0.2) {
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      if (response.status === 429) {
-        if (m !== GROQ_FALLBACK_MODEL) return attempt(GROQ_FALLBACK_MODEL)
-        // Both Groq models exhausted — fall back to Gemini if key is configured
+      const errMsg = err.error?.message || ''
+      if (response.status === 429 || errMsg.toLowerCase().includes('too large') || response.status === 413) {
+        if (response.status === 429 && m !== GROQ_FALLBACK_MODEL) return attempt(GROQ_FALLBACK_MODEL)
+        // Request too large or both models exhausted — fall back to Gemini
         if (getGeminiKey()) return callGeminiText(messages, temperature)
-        throw new Error('Groq 每日 token 已用尽，请明天再试或配置 Gemini API Key')
+        if (response.status === 429) throw new Error('Groq 每日 token 已用尽，请明天再试或配置 Gemini API Key')
+        throw new Error('请求内容过长，请配置 Gemini API Key 以支持更长内容')
       }
-      throw new Error(err.error?.message || 'Groq API请求失败')
+      throw new Error(errMsg || 'Groq API请求失败')
     }
     const respData = await response.json()
     const text = respData.choices?.[0]?.message?.content
@@ -381,30 +394,28 @@ const parseGroqResponse = (content) => {
 const normalizeDictForms = async (candidates) => {
   const toFix = candidates.filter(c => c.type === 'vocabulary' || c.type === 'collocation')
   if (toFix.length === 0) return candidates
-  const input = toFix.map(c => ({ id: c.id, term: c.term }))
-  try {
-    const content = await callGroq(
-      [
-        { role: 'system', content: '你是日语语法专家。只返回JSON数组，不要其他文字。' },
-        {
-          role: 'user',
-          content: `将以下日语词汇的term字段全部转为辞书形（原形），id字段原样保留：
+  const BATCH = 40
+  const normMap = {}
+  const SYSTEM = '你是日语语法专家。只返回JSON数组，不要其他文字。'
+  const buildPrompt = (input) =>
+    `将以下日语词汇的term字段全部转为辞书形（原形），id字段原样保留：
 ・动词活用形→辞书形：した/される/された/している/していた→する；んでいる→む；いでいる→ぐ；てきた→てくる；など
 ・形容词变形→辞书形：くて/くない/かった→い形原形
 ・名词、副词、惯用句：不变，原样保留
 输入：${JSON.stringify(input)}
-输出：同格式JSON数组，只修改需要还原的term，不需要还原的也原样返回。`,
-        },
-      ],
-      GROQ_TEXT_MODEL,
-      0,
-    )
-    const normalized = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] || '[]')
-    const normMap = Object.fromEntries(normalized.map(n => [n.id, n.term]).filter(([, t]) => t))
-    return candidates.map(c => (normMap[c.id] ? { ...c, term: normMap[c.id] } : c))
-  } catch {
-    return candidates
+输出：同格式JSON数组，只修改需要还原的term，不需要还原的也原样返回。`
+  for (let i = 0; i < toFix.length; i += BATCH) {
+    const batch = toFix.slice(i, i + BATCH).map(c => ({ id: c.id, term: c.term }))
+    try {
+      const content = await callGroq(
+        [{ role: 'system', content: SYSTEM }, { role: 'user', content: buildPrompt(batch) }],
+        GROQ_TEXT_MODEL, 0,
+      )
+      const normalized = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] || '[]')
+      normalized.forEach(n => { if (n.id && n.term) normMap[n.id] = n.term })
+    } catch { /* keep originals for this batch */ }
   }
+  return candidates.map(c => (normMap[c.id] ? { ...c, term: normMap[c.id] } : c))
 }
 
 const sortBySourceOrder = (candidates, sourceText) => {
@@ -1257,7 +1268,7 @@ function SourceCategoryEditor({ sourceId, currentCategory, allCategories, onAssi
 }
 
 // Points List View Component
-function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources, onDeleteCategory }) {
+function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAddPoint, sourceNames, onRenameSource, sourceCategories, onAssignSourceCategory, onDeletePoint, onUpdatePointExample, onUpdateGrammarStyle, onMergeSources, onDeleteCategory, favorites = new Set(), onToggleFavorite }) {
   const [selectedFolder, setSelectedFolder] = useState(null) // null = folder grid; '__uncat__' or category name
   const [openEditorId, setOpenEditorId] = useState(null)     // point tag editor
   const [openCatEditorId, setOpenCatEditorId] = useState(null) // source category editor
@@ -1589,23 +1600,18 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                     )
                                   ).slice(0, 4)
                                 : []
-                              // Dynamic exam hint
-                              const examLines = []
+                              // Word-specific study tags
+                              const examTags = []
                               if (point.type === 'grammar') {
-                                if (point.connection) examLines.push(`📎 接続：${point.connection}`)
-                                examLines.push('📝 文の文法1：选填正确接续形式')
-                                examLines.push('📝 文の文法2：4词重排成句')
-                                if (point.grammarStyle === 'formal') examLines.push('📖 书面语・正式文体常用')
-                                else if (point.grammarStyle === 'daily') examLines.push('💬 口语・日常会话常用')
+                                if (point.grammarStyle === 'formal') examTags.push({ label: '书面语', color: 'bg-blue-50 text-blue-600' })
+                                else if (point.grammarStyle === 'daily') examTags.push({ label: '口语', color: 'bg-green-50 text-green-600' })
                               } else if (point.type === 'collocation') {
-                                examLines.push('📝 言い換え：选出意思最近的表达')
-                                examLines.push('📝 用法：判断哪句使用正确')
-                                if (/[一-鿿]/.test(point.term)) examLines.push('⚠️ 考整体语义，不能按字面理解')
+                                if (/[一-鿿]/.test(point.term)) examTags.push({ label: '⚠️ 不可按字面理解', color: 'bg-amber-50 text-amber-600' })
                               } else {
-                                examLines.push('📝 言い換え：选出意思最近的词')
-                                examLines.push('📝 文脈規定：选词填入句中空白')
-                                examLines.push('📝 用法：判断哪个句子用法正确')
-                                if (point.partOfSpeech) examLines.push(`品词：${point.partOfSpeech}`)
+                                if (point.partOfSpeech) examTags.push({ label: point.partOfSpeech, color: 'bg-gray-100 text-gray-500' })
+                              }
+                              if ((point.occurrenceCount || 1) > 1 && point.source?.title) {
+                                examTags.push({ label: `${point.source.title} 出现${point.occurrenceCount}次`, color: 'bg-orange-50 text-orange-500' })
                               }
                               return (
                                 <tr key={point.id} className="align-top">
@@ -1623,13 +1629,10 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                     </div>
                                   </td>
                                   <td className="py-3 px-3 text-gray-600 hidden md:table-cell">
-                                    {point.reading || point.level || point.partOfSpeech || '-'}
+                                    {point.reading || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '') || ''}
                                   </td>
                                   <td className="py-3 px-3 text-gray-700">
                                     {point.meaningCN || point.usage || point.nuance || '-'}
-                                    {point.connection && (
-                                      <div className="mt-1 text-xs text-gray-500">接续：{point.connection}</div>
-                                    )}
                                   </td>
                                   <td className="py-3 pl-3 text-gray-600 hidden lg:table-cell">
                                     {point.example
@@ -1640,13 +1643,20 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                     )}
                                   </td>
                                   <td className="py-3 pl-3 min-w-[160px]">
-                                    <div className="space-y-0.5">
-                                      {examLines.map((line, i) => (
-                                        <div key={i} className="text-xs text-gray-500 leading-5">{line}</div>
-                                      ))}
-                                    </div>
+                                    {point.type === 'grammar' && point.connection && (
+                                      <div className="text-xs text-gray-600 mb-1.5 font-mono leading-5">
+                                        {point.connection}
+                                      </div>
+                                    )}
+                                    {examTags.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {examTags.map((tag, i) => (
+                                          <span key={i} className={`px-1.5 py-0.5 rounded text-xs font-medium ${tag.color}`}>{tag.label}</span>
+                                        ))}
+                                      </div>
+                                    )}
                                     {relatedCollocations.length > 0 && (
-                                      <div className="mt-2 pt-2 border-t border-gray-100">
+                                      <div className={`${examTags.length > 0 || (point.type === 'grammar' && point.connection) ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
                                         <div className="text-xs text-gray-400 mb-1">相关搭配：</div>
                                         {relatedCollocations.map(r => (
                                           <div key={r.id} className="text-xs text-indigo-600 leading-5">
@@ -1655,17 +1665,31 @@ function PointsListView({ points, userTags, onUpdatePointTags, onCreateTag, onAd
                                         ))}
                                       </div>
                                     )}
+                                    {examTags.length === 0 && relatedCollocations.length === 0 && !(point.type === 'grammar' && point.connection) && (
+                                      <span className="text-xs text-gray-300">—</span>
+                                    )}
                                   </td>
                                   <td className="py-3 pl-2">
-                                    <button
-                                      onClick={() => onDeletePoint(point.id)}
-                                      className="text-gray-300 hover:text-red-500 transition-colors"
-                                      title="删除考点"
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                                      </svg>
-                                    </button>
+                                    <div className="flex flex-col gap-1.5 items-center">
+                                      <button
+                                        onClick={() => onToggleFavorite && onToggleFavorite(point.id)}
+                                        className={`transition-colors ${favorites.has(point.id) ? 'text-yellow-400 hover:text-yellow-500' : 'text-gray-200 hover:text-yellow-400'}`}
+                                        title={favorites.has(point.id) ? '取消收藏' : '收藏'}
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        onClick={() => onDeletePoint(point.id)}
+                                        className="text-gray-200 hover:text-red-500 transition-colors"
+                                        title="删除考点"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                        </svg>
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               )
@@ -1880,13 +1904,6 @@ function FlashcardView({ points, sourceNames, sourceCategories, onReview }) {
 }
 
 function StatisticsView({ points }) {
-  const typeCount = points.reduce((acc, p) => {
-    acc[p.type] = (acc[p.type] || 0) + 1
-    return acc
-  }, {})
-
-  const dueCount = points.filter(p => !p.nextReviewAt || new Date(p.nextReviewAt) <= new Date()).length
-  const reviewedCount = points.filter(p => p.lastReviewedAt).length
   const uniquePoints = [...points].sort((a, b) => (b.occurrenceCount || 1) - (a.occurrenceCount || 1))
 
   if (points.length === 0) {
@@ -1903,91 +1920,149 @@ function StatisticsView({ points }) {
     <div className="max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">📊 统计分析</h2>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-blue-600">{points.length}</div>
-          <div className="text-sm text-gray-500">总考点数</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-orange-600">{dueCount}</div>
-          <div className="text-sm text-gray-500">待复习</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-green-600">{reviewedCount}</div>
-          <div className="text-sm text-gray-500">已复习</div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-3xl font-bold text-purple-600">{Object.keys(typeCount).length}</div>
-          <div className="text-sm text-gray-500">类型数</div>
-        </div>
-      </div>
-
-      {/* Type Distribution */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">类型分布</h3>
-        <div className="space-y-3">
-          {Object.entries(typeCount).map(([type, count]) => {
-            const colors = TYPE_COLORS[type] || TYPE_COLORS.vocabulary
-            const percentage = Math.round((count / points.length) * 100)
-            return (
-              <div key={type} className="flex items-center gap-4">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${colors.bg} ${colors.text}`}>
-                  {TYPE_LABELS[type]}
-                </span>
-                <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
-                  <div
-                    className={`h-full ${colors.bg.replace('100', '500')}`}
-                    style={{ width: `${percentage}%` }}
-                  />
-                </div>
-                <span className="text-sm font-medium text-gray-600 w-16 text-right">
-                  {count} ({percentage}%)
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
       {/* High Frequency Points */}
       {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-1">🔥 高频考点</h3>
-          <p className="text-xs text-gray-400 mb-4">出现次数越多，JLPT 考试越可能直接考察</p>
-          <div className="space-y-2">
-            {uniquePoints.filter(p => (p.occurrenceCount || 1) >= 2).slice(0, 10).map((p, idx) => {
-              const colors = TYPE_COLORS[p.type] || TYPE_COLORS.vocabulary
-              const sourceTitle = p.source?.title || p.source?.id || null
-              const sectionLabel = p.type === 'grammar' ? '文法' : '語彙'
-              const examRef = sourceTitle
-                ? `在 ${sourceTitle} N1 真题${sectionLabel}部分出现 ${p.occurrenceCount || 1} 次`
-                : `在历年 N1 真题中出现 ${p.occurrenceCount || 1} 次`
-              const extra = p.type === 'grammar' && p.connection ? `接続：${p.connection}` : null
-              return (
-                <div key={idx} className="p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-4">
-                    <span className="text-2xl font-bold text-gray-400 w-8 flex-shrink-0">{idx + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-gray-900">{p.term}</span>
-                        {p.reading && <span className="text-sm text-gray-500">({p.reading})</span>}
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text}`}>{TYPE_LABELS[p.type] || p.type}</span>
-                      </div>
-                      {p.meaningCN && <div className="text-sm text-gray-600 mt-0.5">{p.meaningCN}</div>}
-                      <div className="text-xs text-orange-500 mt-1">📚 {examRef}</div>
-                      {extra && <div className="text-xs text-gray-400 mt-0.5">📎 {extra}</div>}
-                    </div>
-                    <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${colors.bg} ${colors.text}`}>
-                      ×{p.occurrenceCount || 1}
-                    </span>
-                  </div>
+          <p className="text-xs text-gray-400 mb-4">在真题中出现多次，JLPT 直接考察概率更高</p>
+          {[
+            { type: 'grammar', label: '语法' },
+            { type: 'collocation', label: '搭配' },
+            { type: 'vocabulary', label: '单词' },
+          ].map(({ type, label }) => {
+            const group = uniquePoints.filter(p => p.type === type && (p.occurrenceCount || 1) >= 2)
+            if (group.length === 0) return null
+            const colors = TYPE_COLORS[type] || TYPE_COLORS.vocabulary
+            return (
+              <div key={type} className="mb-5 last:mb-0">
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold mb-3 ${colors.bg} ${colors.text}`}>
+                  {label} · {group.length} 个
                 </div>
-              )
-            })}
-          </div>
+                <div className="space-y-2">
+                  {group.map((p, idx) => {
+                    const sourceTitle = p.source?.title || p.source?.id || null
+                    const sectionLabel = p.type === 'grammar' ? '文法' : '語彙'
+                    const examRef = sourceTitle
+                      ? `${sourceTitle} N1 真题${sectionLabel}部分 ×${p.occurrenceCount || 1}`
+                      : `历年 N1 真题 ×${p.occurrenceCount || 1}`
+                    return (
+                      <div key={idx} className="p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <span className="text-lg font-bold text-gray-300 w-6 flex-shrink-0 mt-0.5">{idx + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-gray-900">{p.term}</span>
+                              {p.reading && <span className="text-sm text-gray-500">({p.reading})</span>}
+                            </div>
+                            {p.meaningCN && <div className="text-sm text-gray-600 mt-0.5">{p.meaningCN}</div>}
+                            {p.type === 'grammar' && p.connection && (
+                              <div className="text-xs text-gray-400 mt-0.5 font-mono">{p.connection}</div>
+                            )}
+                            <div className="text-xs text-orange-500 mt-1">📚 {examRef}</div>
+                          </div>
+                          <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${colors.bg} ${colors.text}`}>
+                            ×{p.occurrenceCount || 1}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
+
+function FavoritesView({ points, favorites, onToggleFavorite, onDeletePoint }) {
+  const favPoints = points.filter(p => favorites.has(p.id))
+  if (favPoints.length === 0) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-16">
+        <div className="text-6xl mb-4">⭐</div>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">暂无收藏</h2>
+        <p className="text-gray-400 text-sm">在考点列表中点击 ★ 收藏重要考点</p>
+      </div>
+    )
+  }
+
+  const byType = ['grammar', 'collocation', 'vocabulary'].reduce((acc, t) => {
+    const pts = favPoints.filter(p => p.type === t)
+    if (pts.length) acc[t] = pts
+    return acc
+  }, {})
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h2 className="text-2xl font-bold text-gray-800 mb-2">⭐ 收藏考点</h2>
+      <p className="text-sm text-gray-400 mb-6">共 {favPoints.length} 个考点</p>
+      {Object.entries(byType).map(([type, pts]) => {
+        const colors = TYPE_COLORS[type] || TYPE_COLORS.vocabulary
+        return (
+          <div key={type} className="bg-white rounded-xl shadow-sm border border-gray-200 mb-4 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${colors.bg} ${colors.text}`}>{TYPE_LABELS[type]}</span>
+              <span className="text-sm text-gray-400">{pts.length} 个</span>
+            </div>
+            <table className="w-full text-left text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {pts.map(point => {
+                  const displayReading = point.reading || (/^[ぁ-んァ-ヶーa-zA-Z\s・]+$/.test(point.term) ? point.term : '')
+                  return (
+                    <tr key={point.id} className="align-top">
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-gray-900">{point.term}</div>
+                        {displayReading && displayReading !== point.term && (
+                          <div className="text-xs text-gray-400 mt-0.5">{displayReading}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-gray-700 w-1/3">
+                        <div>{point.meaningCN || '-'}</div>
+                        {point.type === 'grammar' && point.connection && (
+                          <div className="text-xs text-gray-400 mt-0.5 font-mono">{point.connection}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-xs w-1/4 hidden md:table-cell">
+                        {point.type === 'grammar' && point.grammarStyle === 'formal' && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">书面语</span>}
+                        {point.type === 'grammar' && point.grammarStyle === 'daily' && <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-600">口语</span>}
+                        {point.type === 'collocation' && /[一-鿿]/.test(point.term) && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600">⚠️ 不可按字面理解</span>}
+                        {(point.occurrenceCount || 1) > 1 && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-500">🔥×{point.occurrenceCount}</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 w-10">
+                        <div className="flex flex-col gap-1.5 items-center">
+                          <button
+                            onClick={() => onToggleFavorite(point.id)}
+                            className="text-yellow-400 hover:text-yellow-500 transition-colors"
+                            title="取消收藏"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => onDeletePoint(point.id)}
+                            className="text-gray-200 hover:text-red-500 transition-colors"
+                            title="删除"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1997,6 +2072,7 @@ function App() {
   const [view, setView] = useState('scan')
   const [points, setPoints] = useState(loadData)
   const [userTags, setUserTags] = useState(loadUserTags)
+  const [favorites, setFavorites] = useState(loadFavorites)
   const [sourceNames, setSourceNames] = useState(loadSourceNames)
   const [sourceCategories, setSourceCategories] = useState(loadSourceCategories)
   const [user, setUser] = useState(null)
@@ -2059,6 +2135,7 @@ function App() {
 
   useEffect(() => { saveData(points) }, [points])
   useEffect(() => { saveUserTags(userTags) }, [userTags])
+  useEffect(() => { saveFavorites(favorites) }, [favorites])
   useEffect(() => { trackEvent(null, 'page_view') }, [])
   useEffect(() => { saveSourceNames(sourceNames) }, [sourceNames])
   useEffect(() => { saveSourceCategories(sourceCategories) }, [sourceCategories])
@@ -2153,6 +2230,15 @@ function App() {
 
   const deletePoint = (pointId) => {
     setPoints(prev => prev.filter(p => p.id !== pointId))
+  }
+
+  const toggleFavorite = (pointId) => {
+    setFavorites(prev => {
+      const next = new Set(prev)
+      if (next.has(pointId)) next.delete(pointId)
+      else next.add(pointId)
+      return next
+    })
   }
 
   const updateGrammarStyle = (pointId, style) => {
@@ -2329,6 +2415,7 @@ function App() {
             {[
               { id: 'scan', icon: '📷', label: '扫描' },
               { id: 'points', icon: '📚', label: '考点' },
+              { id: 'favorites', icon: '⭐', label: `收藏${favorites.size > 0 ? `(${favorites.size})` : ''}` },
               { id: 'cards', icon: '🃏', label: '卡片' },
               { id: 'stats', icon: '📊', label: '统计' },
             ].map((item) => (
@@ -2352,7 +2439,8 @@ function App() {
       {/* Content */}
       <main className="py-8 px-4">
         {view === 'scan' && <ScanView onAddPoints={addPoints} isAdmin={user?.email === ADMIN_EMAIL} onOpenSettings={() => { setSettingsGroqKey(localStorage.getItem('user_groq_key') || ''); setSettingsGeminiKey(localStorage.getItem('user_gemini_key') || ''); setShowSettings(true) }} />}
-        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} />}
+        {view === 'points' && <PointsListView points={points} userTags={userTags} onUpdatePointTags={updatePointCustomTags} onCreateTag={createTag} onAddPoint={p => addPoints([p])} sourceNames={sourceNames} onRenameSource={renameSource} sourceCategories={sourceCategories} onAssignSourceCategory={assignSourceCategory} onDeletePoint={deletePoint} onUpdatePointExample={updatePointExample} onUpdateGrammarStyle={updateGrammarStyle} onMergeSources={mergeSources} onDeleteCategory={deleteCategory} favorites={favorites} onToggleFavorite={toggleFavorite} />}
+        {view === 'favorites' && <FavoritesView points={points} favorites={favorites} onToggleFavorite={toggleFavorite} onDeletePoint={deletePoint} />}
         {view === 'cards' && <FlashcardView points={points} sourceNames={sourceNames} sourceCategories={sourceCategories} onReview={reviewPoint} />}
         {view === 'stats' && <StatisticsView points={points} />}
       </main>
